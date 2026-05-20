@@ -42,6 +42,8 @@ const agentIds: AgentId[] = ['S', 'A', 'B', 'C']
 const taskTypeOptions = ['general', 'startup_validation', 'product_design', 'engineering_review', 'research_brainstorm', 'business_plan', 'ui_review', 'personal_decision']
 const advancedDetails = ref<HTMLDetailsElement | null>(null)
 const agentSection = ref<HTMLElement | null>(null)
+const advancedOpen = ref(false)
+const agentConfigOpen = ref(false)
 const expandedAgents = ref<Record<AgentId, boolean>>({
   S: false,
   A: false,
@@ -83,11 +85,18 @@ function toggleAgent(agentId: AgentId) {
 }
 
 async function openAgentEditor() {
-  if (advancedDetails.value && !advancedDetails.value.open) {
-    advancedDetails.value.open = true
-  }
+  advancedOpen.value = true
+  agentConfigOpen.value = true
   await nextTick()
   agentSection.value?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+}
+
+function syncAdvancedOpen(event: Event) {
+  advancedOpen.value = (event.target as HTMLDetailsElement).open
+}
+
+function syncAgentConfigOpen(event: Event) {
+  agentConfigOpen.value = (event.target as HTMLDetailsElement).open
 }
 </script>
 
@@ -157,13 +166,23 @@ async function openAgentEditor() {
       <div class="trace-list">
         <div class="trace-item">团队：{{ config.team_name || activeTeam }}</div>
         <div class="trace-item">模型：{{ currentModelLabel }}</div>
-        <div class="trace-item">Judge：{{ config.enable_judge ? '已启用' : '已关闭' }}</div>
+        <label class="trace-item trace-toggle">
+          <input v-model="config.enable_judge" type="checkbox" />
+          <span>Judge：{{ config.enable_judge ? '已启用' : '已关闭' }}</span>
+        </label>
         <div class="trace-item">自动模式：{{ config.auto_mode ? '已启用' : '已关闭' }}</div>
         <div class="trace-item">Agent：已启用 {{ enabledAgentCount }}/4</div>
       </div>
+      <div class="quick-agent-row">
+        <label v-for="agentId in agentIds" :key="`quick-${agentId}`" class="quick-agent-chip">
+          <input v-model="config.agents[agentId].enabled" type="checkbox" />
+          <span>{{ agentId }}</span>
+          <small>{{ agentStatusText(agentId) }}</small>
+        </label>
+      </div>
     </section>
 
-    <details ref="advancedDetails" class="sidebar-card sidebar-details">
+    <details ref="advancedDetails" class="sidebar-card sidebar-details" :open="advancedOpen" @toggle="syncAdvancedOpen">
       <summary class="details-summary">
         <span>高级设置</span>
         <span>默认折叠</span>
@@ -245,53 +264,61 @@ async function openAgentEditor() {
             <h3>Agent 编排</h3>
             <span>可完整编辑 S/A/B/C</span>
           </div>
-          <div class="agent-stack">
-            <article v-for="agentId in agentIds" :key="agentId" class="agent-row-card agent-row-card-collapsible">
-              <button class="agent-summary-button" type="button" @click="toggleAgent(agentId)">
-                <div class="agent-topline">
-                  <label class="agent-enable">
-                    <input v-model="config.agents[agentId].enabled" class="agent-enable-checkbox" type="checkbox" @click.stop />
-                  </label>
-                  <div class="agent-identity">
-                    <span class="agent-code">{{ agentId }}</span>
-                    <span class="agent-dot">·</span>
-                    <span class="agent-title" :style="{ color: agentSpecs[agentId].color }">{{ agentSpecs[agentId].display_name }}</span>
-                  </div>
-                  <span class="agent-availability" :class="{ 'is-offline': !config.agents[agentId].enabled || !isAgentAvailable(agentId) }">
-                    <i />
-                    {{ agentStatusText(agentId) }}
-                  </span>
-                </div>
-                <div class="agent-summary-meta">
-                  <span>{{ config.agents[agentId].model || '未配置模型' }}</span>
-                  <span>{{ config.agents[agentId].skill_id || '未选择 skill' }}</span>
-                  <span>{{ expandedAgents[agentId] ? '收起' : '展开' }}</span>
-                </div>
-              </button>
+          <details class="inline-details" :open="agentConfigOpen" @toggle="syncAgentConfigOpen">
+            <summary class="details-summary">
+              <span>展开完整配置</span>
+              <span>{{ enabledAgentCount }}/4</span>
+            </summary>
+            <div class="details-body">
+              <div class="agent-stack">
+                <article v-for="agentId in agentIds" :key="agentId" class="agent-row-card agent-row-card-collapsible">
+                  <button class="agent-summary-button" type="button" @click="toggleAgent(agentId)">
+                    <div class="agent-topline">
+                      <label class="agent-enable">
+                        <input v-model="config.agents[agentId].enabled" class="agent-enable-checkbox" type="checkbox" @click.stop />
+                      </label>
+                      <div class="agent-identity">
+                        <span class="agent-code">{{ agentId }}</span>
+                        <span class="agent-dot">·</span>
+                        <span class="agent-title" :style="{ color: agentSpecs[agentId].color }">{{ agentSpecs[agentId].display_name }}</span>
+                      </div>
+                      <span class="agent-availability" :class="{ 'is-offline': !config.agents[agentId].enabled || !isAgentAvailable(agentId) }">
+                        <i />
+                        {{ agentStatusText(agentId) }}
+                      </span>
+                    </div>
+                    <div class="agent-summary-meta">
+                      <span>{{ config.agents[agentId].model || '未配置模型' }}</span>
+                      <span>{{ config.agents[agentId].skill_id || '未选择 skill' }}</span>
+                      <span>{{ expandedAgents[agentId] ? '收起' : '展开' }}</span>
+                    </div>
+                  </button>
 
-              <div v-if="expandedAgents[agentId]" class="agent-control-stack">
-                <label class="field-compact">
-                  <span>模型</span>
-                  <select v-model="config.agents[agentId].model">
-                    <option v-for="model in models" :key="model.id" :value="model.id">{{ model.label }} · {{ model.provider }}</option>
-                  </select>
-                </label>
-                <label class="field-compact">
-                  <span>提示词人设</span>
-                  <select v-model="config.agents[agentId].skill_id">
-                    <option value="">未选择</option>
-                    <option v-for="skill in skills[agentId]" :key="skill.skill_id" :value="skill.skill_id">
-                      {{ skill.name }}{{ skill.is_latest ? ' · 最新' : ` · v${skill.version}` }}
-                    </option>
-                  </select>
-                </label>
-                <label class="field-compact">
-                  <span>局部 Prompt</span>
-                  <textarea v-model="config.agents[agentId].prompt" rows="3" placeholder="可选覆盖" />
-                </label>
+                  <div v-if="expandedAgents[agentId]" class="agent-control-stack">
+                    <label class="field-compact">
+                      <span>模型</span>
+                      <select v-model="config.agents[agentId].model">
+                        <option v-for="model in models" :key="model.id" :value="model.id">{{ model.label }} · {{ model.provider }}</option>
+                      </select>
+                    </label>
+                    <label class="field-compact">
+                      <span>提示词人设</span>
+                      <select v-model="config.agents[agentId].skill_id">
+                        <option value="">未选择</option>
+                        <option v-for="skill in skills[agentId]" :key="skill.skill_id" :value="skill.skill_id">
+                          {{ skill.name }}{{ skill.is_latest ? ' · 最新' : ` · v${skill.version}` }}
+                        </option>
+                      </select>
+                    </label>
+                    <label class="field-compact">
+                      <span>局部 Prompt</span>
+                      <textarea v-model="config.agents[agentId].prompt" rows="3" placeholder="可选覆盖" />
+                    </label>
+                  </div>
+                </article>
               </div>
-            </article>
-          </div>
+            </div>
+          </details>
         </section>
 
         <details class="inline-details">

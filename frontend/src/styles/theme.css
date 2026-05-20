@@ -737,6 +737,34 @@ button {
   font-size: 12px;
 }
 
+.trace-toggle {
+  display: inline-flex !important;
+  align-items: center;
+  gap: 8px;
+}
+
+.quick-agent-row {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 10px;
+}
+
+.quick-agent-chip {
+  display: inline-flex !important;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--panel-border);
+  background: rgba(255, 255, 255, 0.045);
+}
+
+.quick-agent-chip small {
+  color: var(--text-soft);
+  font-size: 11px;
+}
+
 .message {
   min-width: 0;
   border-radius: 16px;
