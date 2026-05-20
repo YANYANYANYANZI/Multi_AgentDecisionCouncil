@@ -29,6 +29,7 @@ function renderBlocks(lines: string[]) {
   let listItems: string[] = []
   let orderedItems: string[] = []
   let codeLines: string[] = []
+  let tableLines: string[] = []
   let inCode = false
 
   const flushParagraph = () => {
@@ -51,6 +52,29 @@ function renderBlocks(lines: string[]) {
     blocks.push(`<pre><code>${escapeHtml(codeLines.join('\n'))}</code></pre>`)
     codeLines = []
   }
+  const parseTableRow = (line: string) => line.trim().replace(/^\|/, '').replace(/\|$/, '').split('|').map((cell) => cell.trim())
+  const isTableSeparator = (line: string) => /^\|?[\s:-]+(?:\|[\s:-]+)+\|?$/.test(line.trim())
+  const flushTable = () => {
+    if (tableLines.length < 2) {
+      paragraph.push(...tableLines)
+      tableLines = []
+      return
+    }
+    const [headerLine, separatorLine, ...bodyLines] = tableLines
+    if (!isTableSeparator(separatorLine)) {
+      paragraph.push(...tableLines)
+      tableLines = []
+      return
+    }
+    const headers = parseTableRow(headerLine)
+    const rows = bodyLines.map(parseTableRow)
+    blocks.push(
+      `<table><thead><tr>${headers.map((cell) => `<th>${renderInline(cell)}</th>`).join('')}</tr></thead><tbody>${rows
+        .map((row) => `<tr>${row.map((cell) => `<td>${renderInline(cell)}</td>`).join('')}</tr>`)
+        .join('')}</tbody></table>`,
+    )
+    tableLines = []
+  }
 
   for (const line of lines) {
     const trimmed = line.trim()
@@ -58,6 +82,7 @@ function renderBlocks(lines: string[]) {
       flushParagraph()
       flushList()
       flushOrdered()
+      flushTable()
       if (inCode) {
         flushCode()
       }
@@ -72,6 +97,22 @@ function renderBlocks(lines: string[]) {
       flushParagraph()
       flushList()
       flushOrdered()
+      flushTable()
+      continue
+    }
+    if (trimmed.includes('|')) {
+      flushParagraph()
+      flushList()
+      flushOrdered()
+      tableLines.push(line)
+      continue
+    }
+    flushTable()
+    if (/^-{3,}$/.test(trimmed)) {
+      flushParagraph()
+      flushList()
+      flushOrdered()
+      blocks.push('<hr />')
       continue
     }
     if (/^[-*]\s+/.test(trimmed)) {
@@ -100,6 +141,20 @@ function renderBlocks(lines: string[]) {
       blocks.push(`<h4>${renderInline(trimmed.slice(4))}</h4>`)
       continue
     }
+    if (trimmed.startsWith('#### ')) {
+      flushParagraph()
+      flushList()
+      flushOrdered()
+      blocks.push(`<h5>${renderInline(trimmed.slice(5))}</h5>`)
+      continue
+    }
+    if (trimmed.startsWith('##### ')) {
+      flushParagraph()
+      flushList()
+      flushOrdered()
+      blocks.push(`<h6>${renderInline(trimmed.slice(6))}</h6>`)
+      continue
+    }
     if (trimmed.startsWith('## ')) {
       flushParagraph()
       flushList()
@@ -120,6 +175,7 @@ function renderBlocks(lines: string[]) {
   flushParagraph()
   flushList()
   flushOrdered()
+  flushTable()
   flushCode()
 
   return blocks.join('')

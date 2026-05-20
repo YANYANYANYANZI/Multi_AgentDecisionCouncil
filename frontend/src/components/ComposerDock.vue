@@ -27,28 +27,37 @@ const agentIds = ['S', 'A', 'B', 'C'] as const
 const enabledAgents = computed(() =>
   agentIds.filter((agentId) => props.config.agents[agentId].enabled)
 )
+const canSubmit = computed(() => props.roundState === 'idle' && !props.isBusy && Boolean(draft.value.trim()))
+const canTerminate = computed(() => props.roundState !== 'idle')
+const canContinue = computed(() => props.roundState === 'paused' && !props.isBusy)
+const canAuto = computed(() => {
+  if (props.roundState === 'idle') {
+    return !props.isBusy && Boolean(draft.value.trim())
+  }
+  return props.roundState === 'paused' && !props.isBusy
+})
 
 function submit() {
   const value = draft.value.trim()
-  if (!value || props.isBusy || props.roundState !== 'idle') return
+  if (!canSubmit.value) return
   emit('send', value)
   draft.value = ''
 }
 
 function autoSubmit() {
   const value = draft.value.trim()
-  if (!value || props.isBusy || props.roundState !== 'idle') return
+  if (!canSubmit.value) return
   emit('autoRound', value)
   draft.value = ''
 }
 
 function terminate() {
-  if (props.roundState === 'idle') return
+  if (!canTerminate.value) return
   emit('terminateRound')
 }
 
 function continueRound() {
-  if (props.roundState !== 'paused' || props.isBusy) return
+  if (!canContinue.value) return
   emit('continueRound')
 }
 
@@ -118,15 +127,15 @@ function useIntervention(key: string) {
 
         <button
           class="send-button"
-          :disabled="roundState === 'idle' ? (isBusy || !draft.trim()) : isBusy"
+          :disabled="roundState === 'idle' ? !canSubmit : !canTerminate"
           @click="roundState === 'idle' ? submit() : terminate()"
         >
           {{ roundState === 'idle' ? '发送' : '终止' }}
         </button>
-        <button class="send-button secondary-action" :disabled="roundState !== 'paused' || isBusy" @click="continueRound">继续</button>
+        <button class="send-button secondary-action" :disabled="!canContinue" @click="continueRound">继续</button>
         <button
           class="send-button secondary-action"
-          :disabled="roundState === 'running' || (roundState === 'idle' && (!draft.trim() || isBusy))"
+          :disabled="!canAuto"
           @click="roundState === 'paused' ? emit('autoRound', '') : autoSubmit()"
         >
           自动

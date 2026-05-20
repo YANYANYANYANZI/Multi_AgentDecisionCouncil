@@ -756,7 +756,9 @@ button {
 
 .rich-text h2,
 .rich-text h3,
-.rich-text h4 {
+.rich-text h4,
+.rich-text h5,
+.rich-text h6 {
   margin: 1em 0 0.45em;
   letter-spacing: -0.02em;
 }
@@ -784,6 +786,32 @@ button {
 
 .rich-text code {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+.rich-text hr {
+  border: 0;
+  border-top: 1px solid var(--panel-border);
+  margin: 1rem 0;
+}
+
+.rich-text table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 0.8rem 0;
+  font-size: 13px;
+}
+
+.rich-text th,
+.rich-text td {
+  border: 1px solid var(--panel-border);
+  padding: 8px 10px;
+  text-align: left;
+  vertical-align: top;
+}
+
+.rich-text th {
+  background: rgba(255, 255, 255, 0.05);
+  font-weight: 700;
 }
 
 .dock-shell {
