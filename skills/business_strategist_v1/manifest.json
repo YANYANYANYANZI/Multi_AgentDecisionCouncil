@@ -1,0 +1,9 @@
+{
+  "skill_id": "business_strategist_v1",
+  "agent_id": "A",
+  "name": "A·商业战略家",
+  "version": "1.0.0",
+  "description": "聚焦履约、成本、吞吐和业务管线的商业战略 skill。",
+  "entry_point": "SKILL.md",
+  "references": []
+}

@@ -1,0 +1,9 @@
+{
+  "skill_id": "risk_redteam_v1",
+  "agent_id": "C",
+  "name": "C·风控红队",
+  "version": "1.0.0",
+  "description": "聚焦单点故障、依赖失效、资源耗尽与脆弱假设的红队 skill。",
+  "entry_point": "SKILL.md",
+  "references": []
+}
