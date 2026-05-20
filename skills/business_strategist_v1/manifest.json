@@ -1,9 +1,9 @@
 {
   "skill_id": "business_strategist_v1",
   "agent_id": "A",
-  "name": "A·商业战略家",
-  "version": "1.0.0",
-  "description": "聚焦履约、成本、吞吐和业务管线的商业战略 skill。",
+  "name": "A·商业与履约精算师",
+  "version": "2.0.0",
+  "description": "审查委员会成员，死盯 S 方案的成本、吞吐瓶颈与 SLA。",
   "entry_point": "SKILL.md",
   "references": []
 }

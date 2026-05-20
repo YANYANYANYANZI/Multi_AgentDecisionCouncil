@@ -8,7 +8,7 @@ import os
 from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 from uuid import uuid4
 
 from fastapi import FastAPI, File, HTTPException, UploadFile
@@ -87,6 +87,11 @@ class RuntimeConfigPayload(BaseModel):
 class RoundRequest(BaseModel):
     user_input: str
     config: RuntimeConfigPayload
+    mode: Literal["manual", "auto"] = "manual"
+
+
+class ContinueRoundRequest(BaseModel):
+    mode: Literal["manual", "auto"] = "manual"
 
 
 class SaveSessionRequest(BaseModel):
@@ -103,6 +108,7 @@ class SessionState:
     project_name: str = "未命名议题"
     rounds: list[dict[str, Any]] = field(default_factory=list)
     graph_state: dict[str, Any] = field(default_factory=lambda: {"messages": [], "summary": ""})
+    pending_execution: dict[str, Any] | None = None
 
 
 class SessionSnapshot(BaseModel):
@@ -167,6 +173,9 @@ def _settings_defaults() -> dict[str, Any]:
         or (settings.agent_a_api_key if settings.agent_a_api_key.startswith("ark-") else "")
     )
     availability = _infer_availability(deepseek_key, ark_key)
+    agent_s_default = settings.agent_s_model if availability.get(settings.agent_s_model, False) else (
+        _default_model_for_provider("Volcengine Ark", availability) or _default_model_for_provider("DeepSeek", availability) or settings.agent_s_model
+    )
     agent_a_default = _default_model_for_provider("Volcengine Ark", availability) or _default_model_for_provider("DeepSeek", availability) or settings.agent_a_model
     deepseek_default = _default_model_for_provider("DeepSeek", availability) or settings.agent_b_model
     ark_default = _default_model_for_provider("Volcengine Ark", availability) or settings.agent_b_model
@@ -180,6 +189,7 @@ def _settings_defaults() -> dict[str, Any]:
         "ark_api_key": ark_key,
         "summary_model": summary_default,
         "agents": {
+            "S": {"enabled": True, "model": agent_s_default, "skill_id": (SKILL_REGISTRY.latest_for_agent("S").skill_id if SKILL_REGISTRY.latest_for_agent("S") else ""), "prompt": ""},
             "A": {"enabled": True, "model": agent_a_default, "skill_id": (SKILL_REGISTRY.latest_for_agent("A").skill_id if SKILL_REGISTRY.latest_for_agent("A") else ""), "prompt": ""},
             "B": {"enabled": True, "model": agent_b_default, "skill_id": (SKILL_REGISTRY.latest_for_agent("B").skill_id if SKILL_REGISTRY.latest_for_agent("B") else ""), "prompt": ""},
             "C": {"enabled": True, "model": agent_c_default, "skill_id": (SKILL_REGISTRY.latest_for_agent("C").skill_id if SKILL_REGISTRY.latest_for_agent("C") else ""), "prompt": ""},
@@ -288,35 +298,299 @@ async def _probe_models_async(deepseek_key: str, ark_key: str) -> dict[str, bool
     return results
 
 
-async def _run_round(session: SessionState, payload: RuntimeConfigPayload, user_input: str) -> dict[str, Any]:
+def _build_runtime_context(
+    session: SessionState,
+    payload: RuntimeConfigPayload,
+    user_input: str,
+) -> tuple[dict[str, Any], dict[str, Any]]:
     active_agents = [agent_id for agent_id, value in payload.agents.items() if value.enabled]
     if not active_agents:
         raise HTTPException(status_code=400, detail="至少启用一个 Agent，当前轮次才能发送。")
 
     session.project_name = payload.project_name.strip() or "未命名议题"
+    agent_s_model = payload.agents["S"].model
     agent_a_model = payload.agents["A"].model
     agent_b_model = payload.agents["B"].model
     agent_c_model = payload.agents["C"].model
-    summary_model = payload.summary_model or agent_a_model
+    summary_model = payload.summary_model or agent_s_model
+    agent_s_api_key = _select_api_key(agent_s_model, payload.deepseek_api_key.strip(), payload.ark_api_key.strip())
     agent_a_api_key = _select_api_key(agent_a_model, payload.deepseek_api_key.strip(), payload.ark_api_key.strip())
     agent_b_api_key = _select_api_key(agent_b_model, payload.deepseek_api_key.strip(), payload.ark_api_key.strip())
     agent_c_api_key = _select_api_key(agent_c_model, payload.deepseek_api_key.strip(), payload.ark_api_key.strip())
     summary_api_key = _select_api_key(summary_model, payload.deepseek_api_key.strip(), payload.ark_api_key.strip())
 
+    _assert_model_key(agent_s_model, agent_s_api_key)
     _assert_model_key(agent_a_model, agent_a_api_key)
     _assert_model_key(agent_b_model, agent_b_api_key)
     _assert_model_key(agent_c_model, agent_c_api_key)
     _assert_model_key(summary_model, summary_api_key)
 
     settings = load_settings(
+        agent_s_base_url=_model_by_id(agent_s_model)["base_url"],
         agent_a_base_url=_model_by_id(agent_a_model)["base_url"],
         agent_b_base_url=_model_by_id(agent_b_model)["base_url"],
         agent_c_base_url=_model_by_id(agent_c_model)["base_url"],
         summary_base_url=_model_by_id(summary_model)["base_url"],
+        agent_s_model=agent_s_model,
         agent_a_model=agent_a_model,
         agent_b_model=agent_b_model,
         agent_c_model=agent_c_model,
         summary_model=summary_model,
+        agent_s_api_key=agent_s_api_key,
+        agent_a_api_key=agent_a_api_key,
+        agent_b_api_key=agent_b_api_key,
+        agent_c_api_key=agent_c_api_key,
+        summary_api_key=summary_api_key,
+    )
+    selected_skills = {
+        "S": payload.agents["S"].skill_id,
+        "A": payload.agents["A"].skill_id,
+        "B": payload.agents["B"].skill_id,
+        "C": payload.agents["C"].skill_id,
+    }
+    prompt_overrides = {
+        "S": payload.agents["S"].prompt,
+        "A": payload.agents["A"].prompt,
+        "B": payload.agents["B"].prompt,
+        "C": payload.agents["C"].prompt,
+    }
+    configure_agents(
+        settings=settings,
+        preset_prompt=payload.preset_prompt,
+        selected_skills=selected_skills,
+        prompt_overrides=prompt_overrides,
+    )
+
+    context_block = _build_context_block(payload.uploaded_docs)
+    history_input = f"[项目:{session.project_name}]\n{user_input}"
+    if context_block:
+        history_input += f"\n\n[参考资料]\n{context_block}"
+
+    state = {
+        "messages": messages_from_dict(session.graph_state.get("messages", []))
+        + [HumanMessage(content=history_input, name="control_center", id=f"user-{uuid4().hex}")],
+        "summary": session.graph_state.get("summary", ""),
+        "human_input": user_input,
+        "active_agents": active_agents,
+    }
+    round_record = {
+        "human_input": user_input,
+        "active_agents": active_agents,
+        "active_agent_models": {
+            "S": _model_label(agent_s_model),
+            "A": _model_label(agent_a_model),
+            "B": _model_label(agent_b_model),
+            "C": _model_label(agent_c_model),
+        },
+        "agent_messages": [],
+    }
+    pending_execution = {
+        "user_input": user_input,
+        "payload": payload.model_dump(),
+        "state": state,
+        "round_record": round_record,
+        "next_agent_index": 0,
+    }
+    return pending_execution, settings
+
+
+async def _finalize_round(session: SessionState, state: dict[str, Any], round_record: dict[str, Any]) -> None:
+    if len(state["messages"]) > 10:
+        try:
+            summary_update = await node_summarizer(state)
+            state["summary"] = summary_update.get("summary", "").strip()
+            removable_ids = {
+                item.id for item in summary_update.get("messages", []) if isinstance(item, RemoveMessage) and item.id
+            }
+            if removable_ids:
+                state["messages"] = [message for message in state["messages"] if getattr(message, "id", None) not in removable_ids]
+        except Exception:
+            pass
+
+    session.rounds.append(round_record)
+    session.graph_state = {
+        "messages": messages_to_dict(state["messages"]),
+        "summary": state.get("summary", ""),
+    }
+    session.pending_execution = None
+
+
+def _next_agent_payload(active_agents: list[str], next_index: int) -> dict[str, str] | None:
+    if next_index >= len(active_agents):
+        return None
+    agent_id = active_agents[next_index]
+    spec = get_agent_spec(agent_id)
+    return {"agent": agent_id, "display_name": spec.display_name}
+
+
+async def _stream_pending_execution(session: SessionState, mode: Literal["manual", "auto"], emit_start: bool):
+    pending = session.pending_execution
+    if pending is None:
+        yield _sse_event("round_failed", {"detail": "当前没有可继续的轮次。"})
+        return
+
+    payload = RuntimeConfigPayload.model_validate(pending["payload"])
+    _, settings = _build_runtime_context(session, payload, pending["user_input"])
+    configure_agents(
+        settings=settings,
+        preset_prompt=payload.preset_prompt,
+        selected_skills={
+            "S": payload.agents["S"].skill_id,
+            "A": payload.agents["A"].skill_id,
+            "B": payload.agents["B"].skill_id,
+            "C": payload.agents["C"].skill_id,
+        },
+        prompt_overrides={
+            "S": payload.agents["S"].prompt,
+            "A": payload.agents["A"].prompt,
+            "B": payload.agents["B"].prompt,
+            "C": payload.agents["C"].prompt,
+        },
+    )
+
+    state = pending["state"]
+    round_record = pending["round_record"]
+    active_agents = round_record["active_agents"]
+    next_index = pending["next_agent_index"]
+
+    if emit_start:
+        yield _sse_event(
+            "round_started",
+            {"round": round_record, "summary": state["summary"], "session_id": session.session_id},
+        )
+    else:
+        next_agent = _next_agent_payload(active_agents, next_index)
+        yield _sse_event(
+            "round_resumed",
+            {"round": round_record, "next_agent": next_agent, "session_id": session.session_id},
+        )
+
+    stop_after = len(active_agents) if mode == "auto" else min(next_index + 1, len(active_agents))
+
+    try:
+        for agent_index in range(next_index, stop_after):
+            agent_id = active_agents[agent_index]
+            spec = get_agent_spec(agent_id)
+            yield _sse_event(
+                "agent_started",
+                {
+                    "agent": agent_id,
+                    "display_name": spec.display_name,
+                    "model": round_record["active_agent_models"][agent_id],
+                },
+            )
+            content_parts: list[str] = []
+            reasoning_parts: list[str] = []
+            try:
+                async for chunk in stream_agent_reply(agent_id, state):
+                    channel = chunk.get("channel", "content")
+                    delta = chunk.get("delta", "")
+                    if not delta:
+                        continue
+                    if channel == "reasoning":
+                        reasoning_parts.append(delta)
+                    else:
+                        content_parts.append(delta)
+                    yield _sse_event("agent_delta", {"agent": agent_id, "channel": channel, "delta": delta})
+
+                content = "".join(content_parts).strip()
+                reasoning = "".join(reasoning_parts).strip()
+                state["messages"] = state["messages"] + [build_agent_ai_message(agent_id, content, reasoning)]
+                round_record["agent_messages"].append({"agent": agent_id, "content": content, "reasoning": reasoning})
+                pending["next_agent_index"] = agent_index + 1
+                yield _sse_event("agent_completed", {"agent": agent_id, "content": content, "reasoning": reasoning})
+            except Exception as exc:
+                detail = _compact_error_message(exc)
+                round_record["agent_messages"].append({"agent": agent_id, "content": "", "reasoning": ""})
+                session.pending_execution = None
+                yield _sse_event(
+                    "agent_failed",
+                    {"agent": agent_id, "detail": detail, "raw_detail": str(exc)},
+                )
+                yield _sse_event("round_failed", {"detail": detail, "raw_detail": str(exc)})
+                return
+
+        if pending["next_agent_index"] < len(active_agents):
+            session.pending_execution = pending
+            yield _sse_event(
+                "round_paused",
+                {
+                    "completed_agent": active_agents[pending["next_agent_index"] - 1],
+                    "next_agent": _next_agent_payload(active_agents, pending["next_agent_index"]),
+                },
+            )
+            return
+
+        summary_error = ""
+        if len(state["messages"]) > 10:
+            try:
+                summary_update = await node_summarizer(state)
+                state["summary"] = summary_update.get("summary", "").strip()
+                removable_ids = {
+                    item.id for item in summary_update.get("messages", []) if isinstance(item, RemoveMessage) and item.id
+                }
+                if removable_ids:
+                    state["messages"] = [message for message in state["messages"] if getattr(message, "id", None) not in removable_ids]
+                yield _sse_event("summary_updated", {"summary": state["summary"]})
+            except Exception as exc:
+                summary_error = _compact_error_message(exc)
+                yield _sse_event("summary_failed", {"detail": summary_error})
+
+        session.rounds.append(round_record)
+        session.graph_state = {
+            "messages": messages_to_dict(state["messages"]),
+            "summary": state.get("summary", ""),
+        }
+        session.pending_execution = None
+        yield _sse_event(
+            "round_completed",
+            {
+                "round": round_record,
+                "session": _session_to_snapshot(session).model_dump(),
+                "summary_error": summary_error,
+            },
+        )
+    except asyncio.CancelledError:
+        raise
+
+
+async def _run_round(session: SessionState, payload: RuntimeConfigPayload, user_input: str) -> dict[str, Any]:
+    if session.pending_execution is not None:
+        raise HTTPException(status_code=409, detail="当前有未结束的轮次，请先继续或终止。")
+    active_agents = [agent_id for agent_id, value in payload.agents.items() if value.enabled]
+    if not active_agents:
+        raise HTTPException(status_code=400, detail="至少启用一个 Agent，当前轮次才能发送。")
+
+    session.project_name = payload.project_name.strip() or "未命名议题"
+    agent_s_model = payload.agents["S"].model
+    agent_a_model = payload.agents["A"].model
+    agent_b_model = payload.agents["B"].model
+    agent_c_model = payload.agents["C"].model
+    summary_model = payload.summary_model or agent_s_model
+    agent_s_api_key = _select_api_key(agent_s_model, payload.deepseek_api_key.strip(), payload.ark_api_key.strip())
+    agent_a_api_key = _select_api_key(agent_a_model, payload.deepseek_api_key.strip(), payload.ark_api_key.strip())
+    agent_b_api_key = _select_api_key(agent_b_model, payload.deepseek_api_key.strip(), payload.ark_api_key.strip())
+    agent_c_api_key = _select_api_key(agent_c_model, payload.deepseek_api_key.strip(), payload.ark_api_key.strip())
+    summary_api_key = _select_api_key(summary_model, payload.deepseek_api_key.strip(), payload.ark_api_key.strip())
+
+    _assert_model_key(agent_s_model, agent_s_api_key)
+    _assert_model_key(agent_a_model, agent_a_api_key)
+    _assert_model_key(agent_b_model, agent_b_api_key)
+    _assert_model_key(agent_c_model, agent_c_api_key)
+    _assert_model_key(summary_model, summary_api_key)
+
+    settings = load_settings(
+        agent_s_base_url=_model_by_id(agent_s_model)["base_url"],
+        agent_a_base_url=_model_by_id(agent_a_model)["base_url"],
+        agent_b_base_url=_model_by_id(agent_b_model)["base_url"],
+        agent_c_base_url=_model_by_id(agent_c_model)["base_url"],
+        summary_base_url=_model_by_id(summary_model)["base_url"],
+        agent_s_model=agent_s_model,
+        agent_a_model=agent_a_model,
+        agent_b_model=agent_b_model,
+        agent_c_model=agent_c_model,
+        summary_model=summary_model,
+        agent_s_api_key=agent_s_api_key,
         agent_a_api_key=agent_a_api_key,
         agent_b_api_key=agent_b_api_key,
         agent_c_api_key=agent_c_api_key,
@@ -326,11 +600,13 @@ async def _run_round(session: SessionState, payload: RuntimeConfigPayload, user_
         settings=settings,
         preset_prompt=payload.preset_prompt,
         selected_skills={
+            "S": payload.agents["S"].skill_id,
             "A": payload.agents["A"].skill_id,
             "B": payload.agents["B"].skill_id,
             "C": payload.agents["C"].skill_id,
         },
         prompt_overrides={
+            "S": payload.agents["S"].prompt,
             "A": payload.agents["A"].prompt,
             "B": payload.agents["B"].prompt,
             "C": payload.agents["C"].prompt,
@@ -340,11 +616,13 @@ async def _run_round(session: SessionState, payload: RuntimeConfigPayload, user_
         settings=settings,
         preset_prompt=payload.preset_prompt,
         selected_skills={
+            "S": payload.agents["S"].skill_id,
             "A": payload.agents["A"].skill_id,
             "B": payload.agents["B"].skill_id,
             "C": payload.agents["C"].skill_id,
         },
         prompt_overrides={
+            "S": payload.agents["S"].prompt,
             "A": payload.agents["A"].prompt,
             "B": payload.agents["B"].prompt,
             "C": payload.agents["C"].prompt,
@@ -388,6 +666,7 @@ async def _run_round(session: SessionState, payload: RuntimeConfigPayload, user_
         "human_input": user_input,
         "active_agents": active_agents,
         "active_agent_models": {
+            "S": _model_label(agent_s_model),
             "A": _model_label(agent_a_model),
             "B": _model_label(agent_b_model),
             "C": _model_label(agent_c_model),
@@ -403,143 +682,15 @@ async def _run_round(session: SessionState, payload: RuntimeConfigPayload, user_
 
 
 async def _stream_round(session: SessionState, payload: RuntimeConfigPayload, user_input: str):
-    active_agents = [agent_id for agent_id, value in payload.agents.items() if value.enabled]
-    if not active_agents:
-        yield _sse_event("round_failed", {"detail": "至少启用一个 Agent，当前轮次才能发送。"})
-        return
-
     try:
-        session.project_name = payload.project_name.strip() or "未命名议题"
-        agent_a_model = payload.agents["A"].model
-        agent_b_model = payload.agents["B"].model
-        agent_c_model = payload.agents["C"].model
-        summary_model = payload.summary_model or agent_a_model
-        agent_a_api_key = _select_api_key(agent_a_model, payload.deepseek_api_key.strip(), payload.ark_api_key.strip())
-        agent_b_api_key = _select_api_key(agent_b_model, payload.deepseek_api_key.strip(), payload.ark_api_key.strip())
-        agent_c_api_key = _select_api_key(agent_c_model, payload.deepseek_api_key.strip(), payload.ark_api_key.strip())
-        summary_api_key = _select_api_key(summary_model, payload.deepseek_api_key.strip(), payload.ark_api_key.strip())
-
-        _assert_model_key(agent_a_model, agent_a_api_key)
-        _assert_model_key(agent_b_model, agent_b_api_key)
-        _assert_model_key(agent_c_model, agent_c_api_key)
-        _assert_model_key(summary_model, summary_api_key)
-
-        settings = load_settings(
-            agent_a_base_url=_model_by_id(agent_a_model)["base_url"],
-            agent_b_base_url=_model_by_id(agent_b_model)["base_url"],
-            agent_c_base_url=_model_by_id(agent_c_model)["base_url"],
-            summary_base_url=_model_by_id(summary_model)["base_url"],
-            agent_a_model=agent_a_model,
-            agent_b_model=agent_b_model,
-            agent_c_model=agent_c_model,
-            summary_model=summary_model,
-            agent_a_api_key=agent_a_api_key,
-            agent_b_api_key=agent_b_api_key,
-            agent_c_api_key=agent_c_api_key,
-            summary_api_key=summary_api_key,
-        )
-        configure_agents(
-            settings=settings,
-            preset_prompt=payload.preset_prompt,
-            selected_skills={
-                "A": payload.agents["A"].skill_id,
-                "B": payload.agents["B"].skill_id,
-                "C": payload.agents["C"].skill_id,
-            },
-            prompt_overrides={
-                "A": payload.agents["A"].prompt,
-                "B": payload.agents["B"].prompt,
-                "C": payload.agents["C"].prompt,
-            },
-        )
-
-        context_block = _build_context_block(payload.uploaded_docs)
-        history_input = f"[项目:{session.project_name}]\n{user_input}"
-        if context_block:
-            history_input += f"\n\n[参考资料]\n{context_block}"
-
-        state = {
-            "messages": messages_from_dict(session.graph_state.get("messages", []))
-            + [HumanMessage(content=history_input, name="control_center", id=f"user-{uuid4().hex}")],
-            "summary": session.graph_state.get("summary", ""),
-            "human_input": user_input,
-            "active_agents": active_agents,
-        }
-        round_record = {
-            "human_input": user_input,
-            "active_agents": active_agents,
-            "active_agent_models": {
-                "A": _model_label(agent_a_model),
-                "B": _model_label(agent_b_model),
-                "C": _model_label(agent_c_model),
-            },
-            "agent_messages": [],
-        }
-        yield _sse_event(
-            "round_started",
-            {"round": round_record, "summary": state["summary"], "session_id": session.session_id},
-        )
-
-        for agent_id in active_agents:
-            spec = get_agent_spec(agent_id)
-            yield _sse_event(
-                "agent_started",
-                {
-                    "agent": agent_id,
-                    "display_name": spec.display_name,
-                    "model": round_record["active_agent_models"][agent_id],
-                },
-            )
-            content_parts: list[str] = []
-            reasoning_parts: list[str] = []
-            try:
-                async for chunk in stream_agent_reply(agent_id, state):
-                    channel = chunk.get("channel", "content")
-                    delta = chunk.get("delta", "")
-                    if not delta:
-                        continue
-                    if channel == "reasoning":
-                        reasoning_parts.append(delta)
-                    else:
-                        content_parts.append(delta)
-                    yield _sse_event("agent_delta", {"agent": agent_id, "channel": channel, "delta": delta})
-
-                content = "".join(content_parts).strip()
-                reasoning = "".join(reasoning_parts).strip()
-                state["messages"] = state["messages"] + [build_agent_ai_message(agent_id, content, reasoning)]
-                round_record["agent_messages"].append({"agent": agent_id, "content": content, "reasoning": reasoning})
-                yield _sse_event("agent_completed", {"agent": agent_id, "content": content, "reasoning": reasoning})
-            except Exception as exc:
-                detail = _compact_error_message(exc)
-                round_record["agent_messages"].append({"agent": agent_id, "content": "", "reasoning": ""})
-                yield _sse_event(
-                    "agent_failed",
-                    {"agent": agent_id, "detail": detail, "raw_detail": str(exc)},
-                )
-
-        if len(state["messages"]) > 10:
-            try:
-                summary_update = await node_summarizer(state)
-                state["summary"] = summary_update.get("summary", "").strip()
-                removable_ids = {
-                    item.id for item in summary_update.get("messages", []) if isinstance(item, RemoveMessage) and item.id
-                }
-                if removable_ids:
-                    state["messages"] = [message for message in state["messages"] if getattr(message, "id", None) not in removable_ids]
-                yield _sse_event("summary_updated", {"summary": state["summary"]})
-            except Exception as exc:
-                yield _sse_event("summary_failed", {"detail": _compact_error_message(exc)})
-
-        session.rounds.append(round_record)
-        session.graph_state = {
-            "messages": messages_to_dict(state["messages"]),
-            "summary": state.get("summary", ""),
-        }
-        yield _sse_event(
-            "round_completed",
-            {"round": round_record, "session": _session_to_snapshot(session).model_dump()},
-        )
+        if session.pending_execution is not None:
+            yield _sse_event("round_failed", {"detail": "当前有未结束的轮次，请先继续或终止。"})
+            return
+        session.pending_execution, _ = _build_runtime_context(session, payload, user_input)
+        async for event in _stream_pending_execution(session, payload.mode, emit_start=True):
+            yield event
     except Exception as exc:
+        session.pending_execution = None
         yield _sse_event("round_failed", {"detail": _compact_error_message(exc), "raw_detail": str(exc)})
 
 
@@ -638,18 +789,43 @@ async def create_round_stream(session_id: str, request: RoundRequest) -> Streami
     )
 
 
+@app.post("/api/sessions/{session_id}/rounds/continue/stream")
+async def continue_round_stream(session_id: str, request: ContinueRoundRequest) -> StreamingResponse:
+    session = _sessions.get(session_id)
+    if session is None:
+        raise HTTPException(status_code=404, detail="会话不存在。")
+    if session.pending_execution is None:
+        raise HTTPException(status_code=409, detail="当前没有可继续的轮次。")
+    return StreamingResponse(
+        _stream_pending_execution(session, request.mode, emit_start=False),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "Connection": "keep-alive"},
+    )
+
+
+@app.post("/api/sessions/{session_id}/rounds/terminate")
+def terminate_round(session_id: str) -> dict[str, Any]:
+    session = _sessions.get(session_id)
+    if session is None:
+        raise HTTPException(status_code=404, detail="会话不存在。")
+    had_pending = session.pending_execution is not None
+    session.pending_execution = None
+    return {"terminated": had_pending}
+
+
 @app.post("/api/sessions/{session_id}/export")
 def export_session(session_id: str, payload: RuntimeConfigPayload) -> dict[str, Any]:
     session = _sessions.get(session_id)
     if session is None:
         raise HTTPException(status_code=404, detail="会话不存在。")
-    summary_model = payload.summary_model or payload.agents["A"].model
+    summary_model = payload.summary_model or payload.agents["S"].model
     summary_api_key = _select_api_key(summary_model, payload.deepseek_api_key.strip(), payload.ark_api_key.strip())
     _assert_model_key(summary_model, summary_api_key)
     settings = load_settings(
         summary_base_url=_model_by_id(summary_model)["base_url"],
         summary_model=summary_model,
         summary_api_key=summary_api_key,
+        agent_s_api_key=_select_api_key(payload.agents["S"].model, payload.deepseek_api_key.strip(), payload.ark_api_key.strip()),
         agent_a_api_key=_select_api_key(payload.agents["A"].model, payload.deepseek_api_key.strip(), payload.ark_api_key.strip()),
         agent_b_api_key=_select_api_key(payload.agents["B"].model, payload.deepseek_api_key.strip(), payload.ark_api_key.strip()),
         agent_c_api_key=_select_api_key(payload.agents["C"].model, payload.deepseek_api_key.strip(), payload.ark_api_key.strip()),

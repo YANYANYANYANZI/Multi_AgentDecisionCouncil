@@ -11,7 +11,7 @@ export interface RuntimeConfig {
   deepseek_api_key: string
   ark_api_key: string
   summary_model: string
-  agents: Record<'A' | 'B' | 'C', AgentSettings>
+  agents: Record<'S' | 'A' | 'B' | 'C', AgentSettings>
   uploaded_docs: UploadedDoc[]
 }
 
@@ -21,7 +21,7 @@ export interface UploadedDoc {
 }
 
 export interface AgentMessage {
-  agent: 'A' | 'B' | 'C'
+  agent: 'S' | 'A' | 'B' | 'C'
   content: string
   reasoning?: string
 }
@@ -43,7 +43,7 @@ export interface PendingRound {
   active_agents: string[]
   active_agent_models: Record<string, string>
   agent_messages: StreamingAgentMessage[]
-  status: 'streaming' | 'error'
+  status: 'streaming' | 'paused' | 'error'
   events: string[]
 }
 
@@ -62,7 +62,7 @@ export interface ModelOption {
 }
 
 export interface AgentSpec {
-  agent_id: 'A' | 'B' | 'C'
+  agent_id: 'S' | 'A' | 'B' | 'C'
   display_name: string
   avatar: string
   color: string
@@ -73,7 +73,7 @@ export interface AgentSpec {
 
 export interface SkillOption {
   skill_id: string
-  agent_id: 'A' | 'B' | 'C'
+  agent_id: 'S' | 'A' | 'B' | 'C'
   name: string
   version: string
   description: string
@@ -87,6 +87,6 @@ export interface BootstrapPayload {
   available_models: ModelOption[]
   availability: Record<string, boolean>
   interventions: Record<string, string>
-  agent_specs: Record<'A' | 'B' | 'C', AgentSpec>
-  skills: Record<'A' | 'B' | 'C', SkillOption[]>
+  agent_specs: Record<'S' | 'A' | 'B' | 'C', AgentSpec>
+  skills: Record<'S' | 'A' | 'B' | 'C', SkillOption[]>
 }

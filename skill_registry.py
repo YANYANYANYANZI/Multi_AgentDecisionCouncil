@@ -82,7 +82,7 @@ class SkillRegistry:
         return items[0] if items else None
 
     def options_payload(self) -> dict[AgentId, list[dict[str, Any]]]:
-        payload: dict[AgentId, list[dict[str, Any]]] = {"A": [], "B": [], "C": []}
+        payload: dict[AgentId, list[dict[str, Any]]] = {"S": [], "A": [], "B": [], "C": []}
         for agent_id in payload:
             latest = self.latest_for_agent(agent_id)
             for skill in self.for_agent(agent_id):

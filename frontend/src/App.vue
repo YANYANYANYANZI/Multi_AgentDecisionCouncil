@@ -15,6 +15,7 @@ const config = reactive<RuntimeConfig>({
   ark_api_key: '',
   summary_model: '',
   agents: {
+    S: { enabled: true, model: '', skill_id: '', prompt: '' },
     A: { enabled: true, model: '', skill_id: '', prompt: '' },
     B: { enabled: true, model: '', skill_id: '', prompt: '' },
     C: { enabled: true, model: '', skill_id: '', prompt: '' },
@@ -27,6 +28,9 @@ const exportText = ref('')
 const savedSessions = ref<string[]>([])
 const pendingRound = ref<PendingRound | null>(null)
 const theme = ref<'light' | 'dark'>('dark')
+const roundState = ref<'idle' | 'running' | 'paused'>('idle')
+const streamController = ref<AbortController | null>(null)
+const suppressAbortError = ref(false)
 
 const configurationWarnings = computed(() => {
   const warnings: string[] = []
@@ -109,20 +113,19 @@ async function loadBootstrap() {
 }
 
 function createPendingRound(prompt: string) {
-  const activeAgents = (['A', 'B', 'C'] as const).filter((agentId) => config.agents[agentId].enabled)
+  const activeAgents = (['S', 'A', 'B', 'C'] as const).filter((agentId) => config.agents[agentId].enabled)
+  const labelFor = (agentId: 'S' | 'A' | 'B' | 'C') => {
+    const model = bootstrap.value?.models.find((item) => item.id === config.agents[agentId].model)
+    return model?.label ? `${model.label} · ${model.provider}` : '未配置模型'
+  }
   return {
     human_input: prompt,
     active_agents: activeAgents,
     active_agent_models: {
-      A: bootstrap.value?.models.find((model) => model.id === config.agents.A.model)?.label
-        ? `${bootstrap.value?.models.find((model) => model.id === config.agents.A.model)?.label} · ${bootstrap.value?.models.find((model) => model.id === config.agents.A.model)?.provider}`
-        : '未配置模型',
-      B: bootstrap.value?.models.find((model) => model.id === config.agents.B.model)?.label
-        ? `${bootstrap.value?.models.find((model) => model.id === config.agents.B.model)?.label} · ${bootstrap.value?.models.find((model) => model.id === config.agents.B.model)?.provider}`
-        : '未配置模型',
-      C: bootstrap.value?.models.find((model) => model.id === config.agents.C.model)?.label
-        ? `${bootstrap.value?.models.find((model) => model.id === config.agents.C.model)?.label} · ${bootstrap.value?.models.find((model) => model.id === config.agents.C.model)?.provider}`
-        : '未配置模型',
+      S: labelFor('S'),
+      A: labelFor('A'),
+      B: labelFor('B'),
+      C: labelFor('C'),
     },
     agent_messages: activeAgents.map((agent) => ({
       agent,
@@ -135,6 +138,11 @@ function createPendingRound(prompt: string) {
   }
 }
 
+function startPendingRound(prompt: string) {
+  pendingRound.value = createPendingRound(prompt)
+  roundState.value = 'running'
+}
+
 function appendPendingEvent(message: string) {
   if (!pendingRound.value) return
   pendingRound.value.events = [...pendingRound.value.events, message].slice(-12)
@@ -142,99 +150,191 @@ function appendPendingEvent(message: string) {
 
 function agentDisplayName(agentId: string) {
   if (!bootstrap.value) return agentId
-  const key = agentId as 'A' | 'B' | 'C'
+  const key = agentId as 'S' | 'A' | 'B' | 'C'
   return bootstrap.value.agent_specs[key]?.display_name || agentId
+}
+
+function buildStreamHandlers() {
+  return {
+    onEvent(event: string, payload: any) {
+      if (!pendingRound.value) return
+      if (event === 'round_started') {
+        appendPendingEvent('调度完成，开始按顺序执行 Agent')
+        return
+      }
+      if (event === 'round_resumed') {
+        appendPendingEvent(`继续执行${payload.next_agent?.display_name ? `：${payload.next_agent.display_name}` : ''}`)
+        return
+      }
+      if (event === 'agent_started') {
+        roundState.value = 'running'
+        pendingRound.value.status = 'streaming'
+        const target = pendingRound.value.agent_messages.find((item) => item.agent === payload.agent)
+        if (target) target.status = 'streaming'
+        appendPendingEvent(`${payload.display_name} 开始输出`)
+        return
+      }
+      if (event === 'agent_delta') {
+        const target = pendingRound.value.agent_messages.find((item) => item.agent === payload.agent)
+        if (target) {
+          if (payload.channel === 'reasoning') {
+            target.reasoning = (target.reasoning || '') + payload.delta
+          } else {
+            target.content += payload.delta
+          }
+          target.status = 'streaming'
+        }
+        return
+      }
+      if (event === 'agent_completed') {
+        const target = pendingRound.value.agent_messages.find((item) => item.agent === payload.agent)
+        if (target) {
+          target.content = payload.content
+          target.reasoning = payload.reasoning || target.reasoning || ''
+          target.status = 'done'
+          target.error = undefined
+        }
+        appendPendingEvent(`${agentDisplayName(payload.agent)} 已完成`)
+        return
+      }
+      if (event === 'agent_failed') {
+        const target = pendingRound.value.agent_messages.find((item) => item.agent === payload.agent)
+        if (target) {
+          target.status = 'error'
+          target.error = payload.detail || '执行失败'
+          target.content = ''
+          target.reasoning = ''
+        }
+        pendingRound.value.status = 'error'
+        roundState.value = 'idle'
+        appendPendingEvent(`${agentDisplayName(payload.agent)} 失败：${payload.detail || '执行失败'}`)
+        return
+      }
+      if (event === 'round_paused') {
+        pendingRound.value.status = 'paused'
+        roundState.value = 'paused'
+        appendPendingEvent(`等待人工审批，下一位：${payload.next_agent?.display_name || '无'}`)
+        return
+      }
+      if (event === 'summary_updated') {
+        if (session.value) {
+          session.value = { ...session.value, summary: payload.summary }
+        }
+        appendPendingEvent('长期摘要已更新')
+        return
+      }
+      if (event === 'summary_failed') {
+        appendPendingEvent(`摘要更新失败：${payload.detail || '未知错误'}`)
+        return
+      }
+      if (event === 'round_completed') {
+        session.value = payload.session
+        pendingRound.value = null
+        roundState.value = 'idle'
+        return
+      }
+      if (event === 'round_failed') {
+        errorMessage.value = payload.detail || '流式执行失败'
+        pendingRound.value.status = 'error'
+        pendingRound.value.agent_messages = pendingRound.value.agent_messages.map((item) => {
+          if (item.status === 'done' || item.status === 'error') return item
+          return { ...item, status: 'error', error: payload.detail || '流式执行失败' }
+        })
+        roundState.value = 'idle'
+        appendPendingEvent(`执行中断：${errorMessage.value}`)
+      }
+    },
+  }
+}
+
+async function runRoundRequest(task: (controller: AbortController) => Promise<void>) {
+  const controller = new AbortController()
+  streamController.value = controller
+  loading.value = true
+  try {
+    await task(controller)
+  } catch (error) {
+    const isAbort = error instanceof DOMException && error.name === 'AbortError'
+    if (!isAbort || !suppressAbortError.value) {
+      errorMessage.value = error instanceof Error ? error.message : '发送失败'
+      if (pendingRound.value) {
+        pendingRound.value.status = 'error'
+        appendPendingEvent(`执行失败：${errorMessage.value}`)
+      }
+      roundState.value = 'idle'
+    }
+  } finally {
+    suppressAbortError.value = false
+    if (streamController.value === controller) {
+      streamController.value = null
+    }
+    loading.value = false
+  }
 }
 
 async function sendPrompt(prompt: string) {
   if (!session.value) return
-  loading.value = true
   errorMessage.value = ''
-  pendingRound.value = createPendingRound(prompt)
+  startPendingRound(prompt)
+  await runRoundRequest((controller) =>
+    councilApi.streamRound(session.value!.session_id, prompt, snapshotConfig(), 'manual', {
+      ...buildStreamHandlers(),
+      signal: controller.signal,
+    }),
+  )
+}
 
+async function autoRound(prompt: string) {
+  if (!session.value) return
+  errorMessage.value = ''
+  if (roundState.value === 'idle') {
+    startPendingRound(prompt)
+    await runRoundRequest((controller) =>
+      councilApi.streamRound(session.value!.session_id, prompt, snapshotConfig(), 'auto', {
+        ...buildStreamHandlers(),
+        signal: controller.signal,
+      }),
+    )
+    return
+  }
+  if (roundState.value === 'paused') {
+    pendingRound.value!.status = 'streaming'
+    roundState.value = 'running'
+    await runRoundRequest((controller) =>
+      councilApi.continueRound(session.value!.session_id, 'auto', {
+        ...buildStreamHandlers(),
+        signal: controller.signal,
+      }),
+    )
+  }
+}
+
+async function continueRound() {
+  if (!session.value || roundState.value !== 'paused') return
+  errorMessage.value = ''
+  pendingRound.value!.status = 'streaming'
+  roundState.value = 'running'
+  await runRoundRequest((controller) =>
+    councilApi.continueRound(session.value!.session_id, 'manual', {
+      ...buildStreamHandlers(),
+      signal: controller.signal,
+    }),
+  )
+}
+
+async function terminateRound() {
+  if (!session.value || roundState.value === 'idle') return
+  suppressAbortError.value = true
+  streamController.value?.abort()
   try {
-    await councilApi.streamRound(session.value.session_id, prompt, snapshotConfig(), {
-      onEvent(event, payload) {
-        if (!pendingRound.value) return
-        if (event === 'round_started') {
-          appendPendingEvent('调度完成，开始按顺序执行 Agent')
-          return
-        }
-        if (event === 'agent_started') {
-          const target = pendingRound.value.agent_messages.find((item) => item.agent === payload.agent)
-          if (target) target.status = 'streaming'
-          appendPendingEvent(`${payload.display_name} 开始输出`)
-          return
-        }
-        if (event === 'agent_delta') {
-          const target = pendingRound.value.agent_messages.find((item) => item.agent === payload.agent)
-          if (target) {
-            if (payload.channel === 'reasoning') {
-              target.reasoning = (target.reasoning || '') + payload.delta
-            } else {
-              target.content += payload.delta
-            }
-            target.status = 'streaming'
-          }
-          return
-        }
-        if (event === 'agent_completed') {
-          const target = pendingRound.value.agent_messages.find((item) => item.agent === payload.agent)
-          if (target) {
-            target.content = payload.content
-            target.reasoning = payload.reasoning || target.reasoning || ''
-            target.status = 'done'
-            target.error = undefined
-          }
-          appendPendingEvent(`${agentDisplayName(payload.agent)} 已完成`)
-          return
-        }
-        if (event === 'agent_failed') {
-          const target = pendingRound.value.agent_messages.find((item) => item.agent === payload.agent)
-          if (target) {
-            target.status = 'error'
-            target.error = payload.detail || '执行失败'
-            target.content = ''
-            target.reasoning = ''
-          }
-          appendPendingEvent(`${agentDisplayName(payload.agent)} 失败：${payload.detail || '执行失败'}`)
-          return
-        }
-        if (event === 'summary_updated') {
-          if (session.value) {
-            session.value = { ...session.value, summary: payload.summary }
-          }
-          appendPendingEvent('长期摘要已更新')
-          return
-        }
-        if (event === 'summary_failed') {
-          appendPendingEvent(`摘要更新失败：${payload.detail || '未知错误'}`)
-          return
-        }
-        if (event === 'round_completed') {
-          session.value = payload.session
-          pendingRound.value = null
-          return
-        }
-        if (event === 'round_failed') {
-          errorMessage.value = payload.detail || '流式执行失败'
-          pendingRound.value.status = 'error'
-          pendingRound.value.agent_messages = pendingRound.value.agent_messages.map((item) => {
-            if (item.status === 'done' || item.status === 'error') return item
-            return { ...item, status: 'error', error: payload.detail || '流式执行失败' }
-          })
-          appendPendingEvent(`执行中断：${errorMessage.value}`)
-        }
-      },
-    })
+    await councilApi.terminateRound(session.value.session_id)
   } catch (error) {
-    errorMessage.value = error instanceof Error ? error.message : '发送失败'
-    if (pendingRound.value) {
-      pendingRound.value.status = 'error'
-      appendPendingEvent(`执行失败：${errorMessage.value}`)
-    }
+    errorMessage.value = error instanceof Error ? error.message : '终止失败'
   } finally {
+    pendingRound.value = null
+    roundState.value = 'idle'
     loading.value = false
+    streamController.value = null
   }
 }
 
@@ -285,6 +385,7 @@ async function createSession() {
   loading.value = true
   errorMessage.value = ''
   pendingRound.value = null
+  roundState.value = 'idle'
   try {
     const response = await councilApi.createSession(config.project_name)
     session.value = response.session
@@ -309,6 +410,7 @@ async function loadSession(fileName: string) {
   loading.value = true
   errorMessage.value = ''
   pendingRound.value = null
+  roundState.value = 'idle'
   try {
     const response = await councilApi.loadSession(fileName)
     session.value = response.session
@@ -401,7 +503,11 @@ onMounted(() => {
             :models="bootstrap.available_models.length ? bootstrap.available_models : bootstrap.models"
             :interventions="bootstrap.interventions"
             :is-busy="loading"
+            :round-state="roundState"
             @send="sendPrompt"
+            @continue-round="continueRound"
+            @auto-round="autoRound"
+            @terminate-round="terminateRound"
             @attach-files="attachFiles"
             @export-markdown="exportMarkdown"
           />

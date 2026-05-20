@@ -1,9 +1,9 @@
 {
   "skill_id": "technical_architect_v1",
   "agent_id": "B",
-  "name": "B·架构专家",
-  "version": "1.0.0",
-  "description": "聚焦系统拓扑、模块边界、状态流与容错的架构 skill。",
+  "name": "B·工程与架构审查",
+  "version": "2.0.0",
+  "description": "审查委员会成员，负责对 S 方案进行技术栈与复杂度的无情审查。",
   "entry_point": "SKILL.md",
   "references": []
 }

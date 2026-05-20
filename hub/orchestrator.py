@@ -9,6 +9,13 @@ from hub.models import AgentReply, BrainstormSession, RoundRecord
 
 AGENTS = [
     {
+        "id": "agent_s",
+        "name": "Agent S · 首席架构师",
+        "focus": "负责先给出系统架构初稿，再吸收 A、B、C 的质疑进行防守或迭代。",
+        "env_key_name": "agent_s_api_key",
+        "model_attr": "agent_s_model",
+    },
+    {
         "id": "agent_a",
         "name": "Agent A · 商业与产品战略家",
         "focus": "只从 PMF、定价、成本、交付效率、转化漏斗和资源分配审视项目。",
@@ -76,7 +83,7 @@ class BrainstormOrchestrator:
 
     def summarize_session(self, session: BrainstormSession, max_rounds: int = 10) -> dict[str, str]:
         client = LLMClient(
-            api_key=self.settings.agent_a_api_key,
+            api_key=self.settings.agent_s_api_key or self.settings.agent_a_api_key,
             base_url=self.settings.base_url,
             model_name=self.settings.summary_model,
         )
@@ -116,7 +123,14 @@ class BrainstormOrchestrator:
         if not markdown:
             markdown = "## 项目定位\n\n待补充。"
         if not mermaid:
-            mermaid = "flowchart TD\n    User[用户想法] --> A[商业战略]\n    A --> B[技术可行性]\n    B --> C[风险红队]\n    C --> Summary[总结导出]"
+            mermaid = (
+                "flowchart TD\n"
+                "    User[用户想法] --> S[首席架构师]\n"
+                "    S --> A[商业战略]\n"
+                "    A --> B[技术可行性]\n"
+                "    B --> C[风险红队]\n"
+                "    C --> Summary[总结导出]"
+            )
 
         return {"markdown": markdown, "mermaid": mermaid}
 

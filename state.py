@@ -7,7 +7,7 @@ from langgraph.graph.message import add_messages
 from typing_extensions import TypedDict
 
 
-AgentId = Literal["A", "B", "C"]
+AgentId = Literal["S", "A", "B", "C"]
 
 
 class CouncilState(TypedDict, total=False):

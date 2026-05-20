@@ -7,10 +7,14 @@ const props = defineProps<{
   models: ModelOption[]
   interventions: Record<string, string>
   isBusy: boolean
+  roundState: 'idle' | 'running' | 'paused'
 }>()
 
 const emit = defineEmits<{
   send: [prompt: string]
+  continueRound: []
+  autoRound: [prompt: string]
+  terminateRound: []
   attachFiles: [files: File[]]
   exportMarkdown: []
 }>()
@@ -18,7 +22,7 @@ const emit = defineEmits<{
 const draft = ref('')
 const menuOpen = ref(false)
 const fileInput = ref<HTMLInputElement | null>(null)
-const agentIds = ['A', 'B', 'C'] as const
+const agentIds = ['S', 'A', 'B', 'C'] as const
 
 const enabledAgents = computed(() =>
   agentIds.filter((agentId) => props.config.agents[agentId].enabled)
@@ -26,9 +30,26 @@ const enabledAgents = computed(() =>
 
 function submit() {
   const value = draft.value.trim()
-  if (!value || props.isBusy) return
+  if (!value || props.isBusy || props.roundState !== 'idle') return
   emit('send', value)
   draft.value = ''
+}
+
+function autoSubmit() {
+  const value = draft.value.trim()
+  if (!value || props.isBusy || props.roundState !== 'idle') return
+  emit('autoRound', value)
+  draft.value = ''
+}
+
+function terminate() {
+  if (props.roundState === 'idle') return
+  emit('terminateRound')
+}
+
+function continueRound() {
+  if (props.roundState !== 'paused' || props.isBusy) return
+  emit('continueRound')
 }
 
 function triggerAttach() {
@@ -90,12 +111,26 @@ function useIntervention(key: string) {
           v-model="draft"
           class="composer-input"
           rows="1"
-          :disabled="isBusy"
+          :disabled="isBusy || roundState !== 'idle'"
           placeholder="输入指令，Enter 发送"
           @keydown.enter.exact.prevent="submit"
         />
 
-        <button class="send-button" :disabled="isBusy || !draft.trim()" @click="submit">发送</button>
+        <button
+          class="send-button"
+          :disabled="roundState === 'idle' ? (isBusy || !draft.trim()) : isBusy"
+          @click="roundState === 'idle' ? submit() : terminate()"
+        >
+          {{ roundState === 'idle' ? '发送' : '终止' }}
+        </button>
+        <button class="send-button secondary-action" :disabled="roundState !== 'paused' || isBusy" @click="continueRound">继续</button>
+        <button
+          class="send-button secondary-action"
+          :disabled="roundState === 'running' || (roundState === 'idle' && (!draft.trim() || isBusy))"
+          @click="roundState === 'paused' ? emit('autoRound', '') : autoSubmit()"
+        >
+          自动
+        </button>
       </div>
     </div>
   </div>

@@ -45,6 +45,7 @@ export const councilApi = {
     sessionId: string,
     userInput: string,
     config: RuntimeConfig,
+    mode: 'manual' | 'auto',
     handlers: {
       onEvent: (event: string, payload: any) => void
       signal?: AbortSignal
@@ -53,7 +54,7 @@ export const councilApi = {
     const response = await fetch(`${API_BASE}/api/sessions/${sessionId}/rounds/stream`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ user_input: userInput, config }),
+      body: JSON.stringify({ user_input: userInput, config, mode }),
       signal: handlers.signal,
     })
     if (!response.ok) {
@@ -92,6 +93,62 @@ export const councilApi = {
 
       if (done) break
     }
+  },
+  async continueRound(
+    sessionId: string,
+    mode: 'manual' | 'auto',
+    handlers: {
+      onEvent: (event: string, payload: any) => void
+      signal?: AbortSignal
+    },
+  ) {
+    const response = await fetch(`${API_BASE}/api/sessions/${sessionId}/rounds/continue/stream`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ mode }),
+      signal: handlers.signal,
+    })
+    if (!response.ok) {
+      let detail = `Request failed with ${response.status}`
+      try {
+        const payload = await response.json()
+        detail = payload.detail || detail
+      } catch {
+        detail = await response.text()
+      }
+      throw new Error(detail)
+    }
+    if (!response.body) {
+      throw new Error('流式响应不可用')
+    }
+
+    const decoder = new TextDecoder('utf-8')
+    const reader = response.body.getReader()
+    let buffer = ''
+
+    while (true) {
+      const { done, value } = await reader.read()
+      buffer += decoder.decode(value || new Uint8Array(), { stream: !done })
+      const chunks = buffer.split('\n\n')
+      buffer = chunks.pop() || ''
+
+      for (const chunk of chunks) {
+        const lines = chunk.split('\n')
+        const eventLine = lines.find((line) => line.startsWith('event: '))
+        const dataLine = lines.find((line) => line.startsWith('data: '))
+        if (!eventLine || !dataLine) continue
+        const event = eventLine.slice(7).trim()
+        const payload = JSON.parse(dataLine.slice(6))
+        handlers.onEvent(event, payload)
+      }
+
+      if (done) break
+    }
+  },
+  terminateRound(sessionId: string) {
+    return request<{ terminated: boolean }>('/api/sessions/' + sessionId + '/rounds/terminate', {
+      method: 'POST',
+    })
   },
   exportSession(sessionId: string, config: RuntimeConfig) {
     return request<{ markdown: string; mermaid: string }>('/api/sessions/' + sessionId + '/export', {

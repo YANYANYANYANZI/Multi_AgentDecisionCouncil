@@ -1,0 +1,9 @@
+{
+  "skill_id": "solution_architect_v1",
+  "agent_id": "S",
+  "name": "S·首席架构师",
+  "version": "1.0.0",
+  "description": "系统的大脑。负责生成完整架构初稿，并吸收委员会挑刺意见进行防守或迭代。",
+  "entry_point": "SKILL.md",
+  "references": []
+}

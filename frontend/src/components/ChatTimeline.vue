@@ -7,7 +7,7 @@ const props = defineProps<{
   projectName: string
   rounds: RoundRecord[]
   summary: string
-  agentSpecs: Record<'A' | 'B' | 'C', AgentSpec>
+  agentSpecs: Record<'S' | 'A' | 'B' | 'C', AgentSpec>
   uploadedDocs: UploadedDoc[]
   loading: boolean
   pendingRound: PendingRound | null
@@ -86,7 +86,8 @@ function pendingMessageError(round: RoundRecord | PendingRound, agentId: string)
           <div class="round-title-group">
             <span class="round-chip">第 {{ index + 1 }} 轮</span>
             <span v-if="index === latestRoundIndex && !pendingRound" class="round-chip round-chip-latest">最新</span>
-            <span v-if="pendingRound && index === liveRounds.length - 1" class="round-chip round-chip-live">流式执行中</span>
+            <span v-if="isPendingRound(round) && round.status === 'streaming'" class="round-chip round-chip-live">流式执行中</span>
+            <span v-if="isPendingRound(round) && round.status === 'paused'" class="round-chip round-chip-latest">等待审批</span>
           </div>
           <span class="round-agents">{{ round.active_agents.join(' · ') }}</span>
         </div>
@@ -94,7 +95,7 @@ function pendingMessageError(round: RoundRecord | PendingRound, agentId: string)
         <div v-if="isPendingRound(round)" class="live-trace">
           <div class="trace-header">
             <strong>执行轨迹</strong>
-            <span>{{ round.status === 'error' ? '已中断' : '实时更新' }}</span>
+            <span>{{ round.status === 'error' ? '已中断' : round.status === 'paused' ? '等待继续' : '实时更新' }}</span>
           </div>
           <div class="trace-list">
             <div v-for="event in round.events" :key="event" class="trace-item">{{ event }}</div>

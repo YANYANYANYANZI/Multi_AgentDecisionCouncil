@@ -15,8 +15,8 @@ from skill_registry import SkillRegistry
 from state import AgentId, CouncilState
 
 
-DEFAULT_ACTIVE_AGENTS: list[AgentId] = ["A", "B", "C"]
-AGENT_ORDER: tuple[AgentId, ...] = ("A", "B", "C")
+DEFAULT_ACTIVE_AGENTS: list[AgentId] = ["S", "A", "B", "C"]
+AGENT_ORDER: tuple[AgentId, ...] = ("S", "A", "B", "C")
 ABSOLUTE_DIRECTIVES = dedent(
     """
     【绝对强制约束 - 违者熔断】：
@@ -39,6 +39,15 @@ class AgentSpec:
 
 
 AGENT_SPECS: dict[AgentId, AgentSpec] = {
+    "S": AgentSpec(
+        agent_id="S",
+        node_name="agent_s",
+        run_name="Agent_S",
+        display_name="S·首席架构师",
+        avatar="👑",
+        color="#4F46E5",
+        system_prompt="你是系统的大脑，负责根据用户指令提出架构初稿，并吸收委员会意见进行迭代。",
+    ),
     "A": AgentSpec(
         agent_id="A",
         node_name="agent_a",
@@ -122,16 +131,19 @@ class AgentRuntime:
 
     def model_for(self, agent_id: AgentId) -> ChatOpenAI:
         model_name = {
+            "S": self.settings.agent_s_model,
             "A": self.settings.agent_a_model,
             "B": self.settings.agent_b_model,
             "C": self.settings.agent_c_model,
         }[agent_id]
         base_url = {
+            "S": self.settings.agent_s_base_url,
             "A": self.settings.agent_a_base_url,
             "B": self.settings.agent_b_base_url,
             "C": self.settings.agent_c_base_url,
         }[agent_id]
         api_key = {
+            "S": self.settings.agent_s_api_key,
             "A": self.settings.agent_a_api_key,
             "B": self.settings.agent_b_api_key,
             "C": self.settings.agent_c_api_key,
@@ -147,7 +159,13 @@ class AgentRuntime:
         ).with_config({"run_name": AGENT_SPECS[agent_id].run_name})
 
     def summarizer_model(self) -> ChatOpenAI:
-        api_key = self.settings.summary_api_key or self.settings.agent_a_api_key or self.settings.agent_b_api_key or self.settings.agent_c_api_key
+        api_key = (
+            self.settings.summary_api_key
+            or self.settings.agent_s_api_key
+            or self.settings.agent_a_api_key
+            or self.settings.agent_b_api_key
+            or self.settings.agent_c_api_key
+        )
         if not api_key:
             raise ValueError("至少需要配置一个 API Key 才能执行总结与导出。")
         return ChatOpenAI(
@@ -325,6 +343,10 @@ async def stream_agent_reply(agent_id: AgentId, state: CouncilState) -> AsyncIte
             yield {"channel": "content", "delta": text}
 
 
+async def node_agent_s(state: CouncilState) -> CouncilState:
+    return await _run_agent("S", state)
+
+
 async def node_agent_a(state: CouncilState) -> CouncilState:
     return await _run_agent("A", state)
 
@@ -415,5 +437,13 @@ def generate_export_bundle(project_name: str, summary: str, messages: list[Human
             """
         ).strip()
     if not mermaid:
-        mermaid = "flowchart TD\n    Human[控制中心] --> Router[Router]\n    Router --> A[Agent A]\n    A --> B[Agent B]\n    B --> C[Agent C]\n    C --> S[Summarizer]"
+        mermaid = (
+            "flowchart TD\n"
+            "    Human[控制中心] --> Router[Router]\n"
+            "    Router --> S[Agent S]\n"
+            "    S --> A[Agent A]\n"
+            "    A --> B[Agent B]\n"
+            "    B --> C[Agent C]\n"
+            "    C --> Summary[Summarizer]"
+        )
     return {"markdown": markdown, "mermaid": mermaid}

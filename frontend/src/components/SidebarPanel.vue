@@ -6,8 +6,8 @@ const props = defineProps<{
   config: RuntimeConfig
   models: ModelOption[]
   availability: Record<string, boolean>
-  agentSpecs: Record<'A' | 'B' | 'C', AgentSpec>
-  skills: Record<'A' | 'B' | 'C', SkillOption[]>
+  agentSpecs: Record<'S' | 'A' | 'B' | 'C', AgentSpec>
+  skills: Record<'S' | 'A' | 'B' | 'C', SkillOption[]>
   savedSessions: string[]
   isBusy: boolean
   theme: 'light' | 'dark'
@@ -22,7 +22,7 @@ const emit = defineEmits<{
   toggleTheme: []
 }>()
 
-const agentIds = ['A', 'B', 'C'] as const
+const agentIds = ['S', 'A', 'B', 'C'] as const
 type AgentId = (typeof agentIds)[number]
 
 const availableModelCount = computed(() => props.models.length)
@@ -89,7 +89,7 @@ function isAgentAvailable(agentId: AgentId) {
     <section class="sidebar-card agent-orchestration-card">
       <div class="section-header compact-section-header">
         <h2>Agent 编排</h2>
-        <span>已启用 {{ enabledAgentCount }}/3</span>
+        <span>已启用 {{ enabledAgentCount }}/4</span>
       </div>
 
       <div class="agent-stack">
