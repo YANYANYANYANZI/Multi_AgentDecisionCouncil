@@ -1,4 +1,12 @@
-import type { BootstrapPayload, RuntimeConfig, SessionSnapshot, UploadedDoc } from '../types'
+import type {
+  BootstrapPayload,
+  RuntimeConfig,
+  SessionSnapshot,
+  UploadedDoc,
+  WorkspaceDocument,
+  WorkspaceState,
+  WorkspaceSummary,
+} from '../types'
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:8000'
 
@@ -151,6 +159,11 @@ export const councilApi = {
       method: 'POST',
     })
   },
+  compressSession(sessionId: string) {
+    return request<{ compact_context: string; summary: string; chars: number }>('/api/sessions/' + sessionId + '/compress', {
+      method: 'POST',
+    })
+  },
   exportSession(sessionId: string, config: RuntimeConfig) {
     return request<{ markdown: string; mermaid: string }>('/api/sessions/' + sessionId + '/export', {
       method: 'POST',
@@ -201,5 +214,66 @@ export const councilApi = {
       method: 'POST',
       body: JSON.stringify({ save_name: saveName }),
     })
+  },
+  listWorkspaces() {
+    return request<{ workspaces: WorkspaceSummary[] }>('/api/workspaces')
+  },
+  createWorkspace(payload: Partial<WorkspaceState> & { workspace_name: string }) {
+    return request<{ workspace: WorkspaceState }>('/api/workspaces', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    })
+  },
+  getWorkspace(workspaceId: string) {
+    return request<{ workspace: WorkspaceState }>(`/api/workspaces/${encodeURIComponent(workspaceId)}`)
+  },
+  updateWorkspace(workspaceId: string, payload: Partial<WorkspaceState>) {
+    return request<{ workspace: WorkspaceState }>(`/api/workspaces/${encodeURIComponent(workspaceId)}`, {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    })
+  },
+  listWorkspaceDocuments(workspaceId: string) {
+    return request<{ documents: WorkspaceDocument[] }>(`/api/workspaces/${encodeURIComponent(workspaceId)}/documents`)
+  },
+  getWorkspaceDocument(workspaceId: string, docId: string) {
+    return request<{ document: WorkspaceDocument }>(
+      `/api/workspaces/${encodeURIComponent(workspaceId)}/documents/${encodeURIComponent(docId)}`,
+    )
+  },
+  updateWorkspaceDocument(workspaceId: string, docId: string, payload: { name?: string; content: string }) {
+    return request<{ document: WorkspaceDocument }>(
+      `/api/workspaces/${encodeURIComponent(workspaceId)}/documents/${encodeURIComponent(docId)}`,
+      {
+        method: 'PUT',
+        body: JSON.stringify(payload),
+      },
+    )
+  },
+  async createWorkspaceDocument(workspaceId: string, payload: { name: string; content: string }) {
+    const formData = new FormData()
+    formData.append('name', payload.name)
+    formData.append('content', payload.content)
+    const response = await fetch(`${API_BASE}/api/workspaces/${encodeURIComponent(workspaceId)}/documents`, {
+      method: 'POST',
+      body: formData,
+    })
+    if (!response.ok) {
+      let detail = `Request failed with ${response.status}`
+      try {
+        const body = await response.json()
+        detail = body.detail || detail
+      } catch {
+        detail = await response.text()
+      }
+      throw new Error(detail)
+    }
+    return response.json() as Promise<{ document: WorkspaceDocument }>
+  },
+  deleteWorkspaceDocument(workspaceId: string, docId: string) {
+    return request<{ deleted: string }>(
+      `/api/workspaces/${encodeURIComponent(workspaceId)}/documents/${encodeURIComponent(docId)}`,
+      { method: 'DELETE' },
+    )
   },
 }

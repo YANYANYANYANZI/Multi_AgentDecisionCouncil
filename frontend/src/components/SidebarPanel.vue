@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import type { AgentSpec, ModelOption, RuntimeConfig, SkillOption } from '../types'
+import type { AgentSpec, ModelOption, RuntimeConfig, SkillOption, WorkspaceDocument, WorkspaceSummary } from '../types'
 
 const props = defineProps<{
   config: RuntimeConfig
@@ -13,6 +13,10 @@ const props = defineProps<{
   savedSessions: string[]
   isBusy: boolean
   theme: 'light' | 'dark'
+  workspaces: WorkspaceSummary[]
+  documents: WorkspaceDocument[]
+  activeDocumentId: string
+  activeDocument: WorkspaceDocument | null
 }>()
 
 const emit = defineEmits<{
@@ -23,160 +27,315 @@ const emit = defineEmits<{
   loadSession: [fileName: string]
   deleteSession: [fileName: string]
   toggleTheme: []
+  createWorkspace: []
+  changeWorkspace: [workspaceId: string]
+  saveWorkspace: []
+  openDocument: [docId: string]
+  toggleDocumentSelection: [docId: string, selected: boolean]
+  saveDocument: []
+  createDocument: []
+  deleteDocument: []
+  updateActiveDocument: [document: WorkspaceDocument]
 }>()
 
 const agentIds = ['S', 'A', 'B', 'C'] as const
-type AgentId = (typeof agentIds)[number]
-
-const availableModelCount = computed(() => props.models.length)
-const enabledAgentCount = computed(() =>
-  agentIds.filter((agentId) => props.config.agents[agentId].enabled).length
-)
-
-function isAgentAvailable(agentId: AgentId) {
-  return Boolean(props.availability[props.config.agents[agentId].model])
-}
+const taskTypeOptions = ['general', 'startup_validation', 'product_design', 'engineering_review', 'research_brainstorm', 'business_plan', 'ui_review', 'personal_decision']
+const enabledAgentCount = computed(() => agentIds.filter((agentId) => props.config.agents[agentId].enabled).length)
+const currentModelLabel = computed(() => props.models.find((item) => item.id === props.config.agents.S.model)?.label || '未配置模型')
 
 function onTeamChange(event: Event) {
-  const target = event.target as HTMLSelectElement
-  emit('changeTeam', target.value)
+  emit('changeTeam', (event.target as HTMLSelectElement).value)
+}
+
+function onWorkspaceChange(event: Event) {
+  emit('changeWorkspace', (event.target as HTMLSelectElement).value)
+}
+
+function onDocumentChange(event: Event) {
+  if (!props.activeDocument) return
+  emit('updateActiveDocument', {
+    ...props.activeDocument,
+    content: (event.target as HTMLTextAreaElement).value,
+  })
 }
 </script>
 
 <template>
   <aside class="sidebar">
     <section class="sidebar-card sidebar-card-hero">
-      <div class="eyebrow">Control</div>
-      <h1>多智能体决策台</h1>
-      <p>配置 Agent、模型与会话。</p>
+      <div class="eyebrow">Workspace</div>
+      <h1>默认可用的决策工作台</h1>
+      <p>首屏只保留全局约束和 Judge 标准，其他配置全部下沉。</p>
       <div class="status-row">
-        <span>{{ availableModelCount }} 个可用模型</span>
-        <div class="hero-actions">
-          <button class="ghost-button" :disabled="isBusy" @click="emit('refreshModels')">刷新探测</button>
-          <button class="theme-button" type="button" @click="emit('toggleTheme')">
-            {{ theme === 'dark' ? '切换浅色模式' : '切换黑暗模式' }}
-          </button>
-        </div>
+        <button class="ghost-button" :disabled="isBusy" @click="emit('refreshModels')">刷新模型</button>
+        <button class="theme-button" type="button" @click="emit('toggleTheme')">
+          {{ theme === 'dark' ? '浅色' : '深色' }}
+        </button>
       </div>
     </section>
 
     <section class="sidebar-card">
-      <div class="section-header project-settings-header">
-        <h2>项目设置</h2>
+      <div class="section-header">
+        <h2>Workspace</h2>
       </div>
       <label>
-        <span>智能体团队</span>
-        <select :value="activeTeam" @change="onTeamChange">
-          <option v-for="teamName in availableTeams" :key="teamName" :value="teamName">
-            {{ teamName }}
+        <span>当前工作区</span>
+        <select :value="config.workspace_id" @change="onWorkspaceChange">
+          <option v-for="workspace in workspaces" :key="workspace.workspace_id" :value="workspace.workspace_id">
+            {{ workspace.workspace_name }}
           </option>
         </select>
       </label>
-      <label class="project-name-inline">
-        <span>项目名</span>
-        <input v-model="config.project_name" type="text" placeholder="未命名议题" />
+      <label>
+        <span>工作区名称</span>
+        <input v-model="config.workspace_name" type="text" placeholder="默认工作区" />
       </label>
       <div class="project-actions-row">
-        <button class="primary-button project-action-button" :disabled="isBusy" @click="emit('createSession')">新建</button>
-        <button class="ghost-button project-action-button" :disabled="isBusy" @click="emit('saveSession')">保存</button>
+        <button class="primary-button project-action-button" :disabled="isBusy" @click="emit('createWorkspace')">新建</button>
+        <button class="ghost-button project-action-button" :disabled="isBusy" @click="emit('saveWorkspace')">保存</button>
       </div>
-      <label>
-        <span>预设提示词</span>
-        <textarea v-model="config.preset_prompt" rows="4" />
-      </label>
-      <details class="inline-details">
-        <summary class="details-summary">
-          <span>API Key</span>
-          <span>可选</span>
-        </summary>
-        <div class="details-body">
-          <label>
-            <span>DeepSeek API Key</span>
-            <input v-model="config.deepseek_api_key" type="password" placeholder="sk-..." />
-          </label>
-          <label>
-            <span>Ark API Key</span>
-            <input v-model="config.ark_api_key" type="password" placeholder="ark-..." />
-          </label>
-        </div>
-      </details>
     </section>
 
-    <section class="sidebar-card agent-orchestration-card">
-      <div class="section-header compact-section-header">
-        <h2>Agent 编排</h2>
-        <span>已启用 {{ enabledAgentCount }}/4</span>
+    <section class="sidebar-card">
+      <div class="section-header">
+        <h2>Core Protocol</h2>
       </div>
-
-      <div class="agent-stack">
-        <article v-for="agentId in agentIds" :key="agentId" class="agent-row-card">
-          <div class="agent-topline">
-            <label class="agent-enable">
-              <input
-                v-model="config.agents[agentId].enabled"
-                class="agent-enable-checkbox"
-                type="checkbox"
-              />
-            </label>
-
-            <div class="agent-identity">
-              <span class="agent-code">{{ agentId }}</span>
-              <span class="agent-dot">·</span>
-              <span
-                class="agent-title"
-                :style="{ color: agentSpecs[agentId].color }"
-              >
-                {{ agentSpecs[agentId].display_name.replace(`${agentId}·`, '') }}
-              </span>
-            </div>
-
-            <span class="agent-availability" :class="{ 'is-offline': !isAgentAvailable(agentId) }">
-              <i />
-              {{ isAgentAvailable(agentId) ? '可用' : '未探测' }}
-            </span>
-          </div>
-
-          <div class="agent-control-stack">
-            <label class="field-compact">
-              <span>模型</span>
-              <select v-model="config.agents[agentId].model">
-                <option v-for="model in models" :key="model.id" :value="model.id">
-                  {{ model.label }} · {{ model.provider }}
-                </option>
-              </select>
-            </label>
-
-            <label class="field-compact">
-              <span>提示词人设</span>
-              <select v-model="config.agents[agentId].skill_id">
-                <option v-for="skill in skills[agentId]" :key="skill.skill_id" :value="skill.skill_id">
-                  {{ skill.name }}{{ skill.is_latest ? ' · 最新' : ` · v${skill.version}` }}
-                </option>
-              </select>
-            </label>
-          </div>
-        </article>
-      </div>
-
-      <label class="field-compact summary-model-field">
-        <span>总结模型</span>
-        <select v-model="config.summary_model">
-          <option v-for="model in models" :key="model.id" :value="model.id">
-            {{ model.label }} · {{ model.provider }}
-          </option>
-        </select>
+      <label>
+        <span>项目全局约束</span>
+        <textarea
+          v-model="config.global_constraint"
+          rows="7"
+          placeholder="写入项目预算、时间、禁止事项、已有资源、输出边界。所有 Agent 必须遵守。"
+        />
       </label>
+      <label>
+        <span>Judge 判断标准</span>
+        <textarea
+          v-model="config.judge_rubric"
+          rows="7"
+          placeholder="写入 Judge 如何判断方案是否跑偏、超预算、违反约束、是否需要砍掉。"
+        />
+      </label>
+    </section>
+
+    <section class="sidebar-card">
+      <div class="section-header">
+        <h2>智能默认配置</h2>
+      </div>
+      <div class="trace-list">
+        <div class="trace-item">团队：{{ config.team_name || activeTeam }}</div>
+        <div class="trace-item">模型：{{ currentModelLabel }}</div>
+        <div class="trace-item">Judge：{{ config.enable_judge ? '已启用' : '已关闭' }}</div>
+        <div class="trace-item">自动模式：{{ config.auto_mode ? '已启用' : '手动' }}</div>
+      </div>
     </section>
 
     <details class="sidebar-card sidebar-details">
       <summary class="details-summary">
-        <span>高级提示词</span>
-        <span>可选</span>
+        <span>高级设置</span>
+        <span>默认折叠</span>
       </summary>
       <div class="details-body">
-        <label v-for="agentId in agentIds" :key="`prompt-${agentId}`" class="field-compact">
-          <span>{{ agentSpecs[agentId].display_name }}</span>
-          <textarea v-model="config.agents[agentId].prompt" rows="4" placeholder="追加局部指令" />
+        <label>
+          <span>团队</span>
+          <select :value="activeTeam" @change="onTeamChange">
+            <option v-for="teamName in availableTeams" :key="teamName" :value="teamName">{{ teamName }}</option>
+          </select>
+        </label>
+        <label>
+          <span>Task Type</span>
+          <select v-model="config.task_brief.task_type">
+            <option v-for="option in taskTypeOptions" :key="option" :value="option">{{ option }}</option>
+          </select>
+        </label>
+        <label>
+          <span>Round Mode</span>
+          <select v-model="config.round_mode">
+            <option value="auto">auto</option>
+            <option value="converge">converge</option>
+            <option value="critique">critique</option>
+            <option value="execute">execute</option>
+            <option value="diverge">diverge</option>
+          </select>
+        </label>
+        <label class="toggle-row">
+          <span>自动压缩</span>
+          <input v-model="config.auto_compress_enabled" type="checkbox" />
+        </label>
+        <label>
+          <span>压缩轮次阈值</span>
+          <input v-model.number="config.auto_compress_turn_threshold" type="number" min="1" />
+        </label>
+        <label>
+          <span>压缩字符阈值</span>
+          <input v-model.number="config.auto_compress_char_threshold" type="number" min="1000" step="500" />
+        </label>
+        <label>
+          <span>保留最近轮次</span>
+          <input v-model.number="config.keep_recent_turns" type="number" min="1" max="6" />
+        </label>
+        <label>
+          <span>预算限制</span>
+          <input v-model="config.task_brief.budget_limit" type="text" />
+        </label>
+        <label>
+          <span>时间限制</span>
+          <input v-model="config.task_brief.time_limit" type="text" />
+        </label>
+        <label>
+          <span>成功指标</span>
+          <input v-model="config.task_brief.success_metric" type="text" />
+        </label>
+        <label>
+          <span>失败标准</span>
+          <input v-model="config.task_brief.failure_criteria" type="text" />
+        </label>
+        <label>
+          <span>目标</span>
+          <textarea v-model="config.task_brief.objective" rows="2" />
+        </label>
+        <label>
+          <span>背景</span>
+          <textarea v-model="config.task_brief.background" rows="3" />
+        </label>
+        <label>
+          <span>已有资源</span>
+          <textarea v-model="config.task_brief.existing_assets" rows="2" />
+        </label>
+        <label>
+          <span>期望输出</span>
+          <textarea v-model="config.task_brief.expected_output" rows="2" />
+        </label>
+
+        <details class="inline-details">
+          <summary class="details-summary">
+            <span>Agent 编排</span>
+            <span>{{ enabledAgentCount }}/4</span>
+          </summary>
+          <div class="details-body">
+            <article v-for="agentId in agentIds" :key="agentId" class="agent-row-card">
+              <div class="agent-topline">
+                <label class="agent-enable">
+                  <input v-model="config.agents[agentId].enabled" class="agent-enable-checkbox" type="checkbox" />
+                </label>
+                <div class="agent-identity">
+                  <span class="agent-code">{{ agentId }}</span>
+                  <span class="agent-dot">·</span>
+                  <span class="agent-title" :style="{ color: agentSpecs[agentId].color }">{{ agentSpecs[agentId].display_name }}</span>
+                </div>
+              </div>
+              <div class="agent-control-stack">
+                <label class="field-compact">
+                  <span>模型</span>
+                  <select v-model="config.agents[agentId].model">
+                    <option v-for="model in models" :key="model.id" :value="model.id">{{ model.label }} · {{ model.provider }}</option>
+                  </select>
+                </label>
+                <label class="field-compact">
+                  <span>Skill</span>
+                  <select v-model="config.agents[agentId].skill_id">
+                    <option v-for="skill in skills[agentId]" :key="skill.skill_id" :value="skill.skill_id">{{ skill.name }}</option>
+                  </select>
+                </label>
+                <label class="field-compact">
+                  <span>局部 Prompt</span>
+                  <textarea v-model="config.agents[agentId].prompt" rows="2" />
+                </label>
+              </div>
+            </article>
+          </div>
+        </details>
+
+        <details class="inline-details">
+          <summary class="details-summary">
+            <span>高级协议与 Key</span>
+            <span>可选</span>
+          </summary>
+          <div class="details-body">
+            <label>
+              <span>Preset Prompt</span>
+              <textarea v-model="config.preset_prompt" rows="3" />
+            </label>
+            <label>
+              <span>Project Prompt</span>
+              <textarea v-model="config.project_prompt" rows="3" />
+            </label>
+            <label>
+              <span>Output Protocol</span>
+              <textarea v-model="config.output_protocol_prompt" rows="3" />
+            </label>
+            <label>
+              <span>总结模型</span>
+              <select v-model="config.summary_model">
+                <option v-for="model in models" :key="model.id" :value="model.id">{{ model.label }} · {{ model.provider }}</option>
+              </select>
+            </label>
+            <label>
+              <span>DeepSeek API Key</span>
+              <input v-model="config.deepseek_api_key" type="password" placeholder="sk-..." />
+            </label>
+            <label>
+              <span>Ark API Key</span>
+              <input v-model="config.ark_api_key" type="password" placeholder="ark-..." />
+            </label>
+          </div>
+        </details>
+      </div>
+    </details>
+
+    <details class="sidebar-card sidebar-details">
+      <summary class="details-summary">
+        <span>Documents</span>
+        <span>{{ documents.length }} 份</span>
+      </summary>
+      <div class="details-body">
+        <div class="project-actions-row">
+          <button class="primary-button project-action-button" :disabled="isBusy" @click="emit('createDocument')">新建文档</button>
+          <button class="ghost-button project-action-button" :disabled="isBusy || !activeDocument" @click="emit('saveDocument')">保存文档</button>
+        </div>
+        <div class="document-list">
+          <label v-for="doc in documents" :key="doc.doc_id" class="document-item">
+            <div class="document-meta">
+              <input
+                :checked="config.selected_documents.includes(doc.doc_id)"
+                type="checkbox"
+                @change="emit('toggleDocumentSelection', doc.doc_id, ($event.target as HTMLInputElement).checked)"
+              />
+              <button type="button" class="session-name-button" @click="emit('openDocument', doc.doc_id)">{{ doc.name }}</button>
+            </div>
+          </label>
+        </div>
+        <div v-if="activeDocument" class="document-editor">
+          <div class="section-header compact-section-header">
+            <h3>{{ activeDocument.name }}</h3>
+            <button class="session-delete-button" type="button" @click="emit('deleteDocument')">删除</button>
+          </div>
+          <textarea :value="activeDocument.content || ''" rows="10" @input="onDocumentChange" />
+        </div>
+      </div>
+    </details>
+
+    <details class="sidebar-card sidebar-details">
+      <summary class="details-summary">
+        <span>Decision Memory</span>
+        <span>{{ config.decision_memory.decisions.length }} 项</span>
+      </summary>
+      <div class="details-body">
+        <label>
+          <span>已确认决策</span>
+          <textarea :value="config.decision_memory.decisions.join('\n')" rows="3" readonly />
+        </label>
+        <label>
+          <span>已否决方案</span>
+          <textarea :value="config.decision_memory.rejected_options.join('\n')" rows="3" readonly />
+        </label>
+        <label>
+          <span>下一步动作</span>
+          <textarea :value="config.decision_memory.next_actions.join('\n')" rows="3" readonly />
+        </label>
+        <label>
+          <span>未解决问题</span>
+          <textarea :value="config.decision_memory.open_questions.join('\n')" rows="3" readonly />
         </label>
       </div>
     </details>
@@ -185,6 +344,10 @@ function onTeamChange(event: Event) {
       <div class="section-header">
         <h2>会话存档</h2>
         <span>{{ savedSessions.length }} 份</span>
+      </div>
+      <div class="project-actions-row">
+        <button class="primary-button project-action-button" :disabled="isBusy" @click="emit('createSession')">新建会话</button>
+        <button class="ghost-button project-action-button" :disabled="isBusy" @click="emit('saveSession')">保存会话</button>
       </div>
       <div class="saved-session-list">
         <div v-for="file in savedSessions" :key="`saved-${file}`" class="saved-session-item">

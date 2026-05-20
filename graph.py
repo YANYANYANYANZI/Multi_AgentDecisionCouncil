@@ -10,24 +10,20 @@ from agents import (
     AGENT_ORDER,
     DEFAULT_ACTIVE_AGENTS,
     configure_agents,
-    node_agent_s,
     node_agent_a,
     node_agent_b,
     node_agent_c,
+    node_agent_s,
+    node_judge,
     node_summarizer,
+    node_update_decision_memory,
 )
 from hub.config import Settings
 from state import AgentId, CouncilState
 
 
 def parse_active_agents(human_input: str) -> list[AgentId]:
-    normalized = (
-        human_input.upper()
-        .replace("，", ",")
-        .replace("、", ",")
-        .replace("和", ",")
-        .replace("及", ",")
-    )
+    normalized = human_input.upper().replace("，", ",").replace("、", ",").replace("和", ",").replace("及", ",")
     all_agents: list[AgentId] = list(DEFAULT_ACTIVE_AGENTS)
 
     include_match = re.search(r"(?:只要|只需|仅需|仅让|只让|ONLY)\s*([SABC,\s]+)", normalized)
@@ -66,8 +62,9 @@ def _extract_agents(text: str) -> list[AgentId]:
 
 
 def _next_active_agent(active_agents: list[AgentId], after: AgentId | None = None) -> str:
+    mapping = {"S": "agent_s", "A": "agent_a", "B": "agent_b", "C": "agent_c"}
     if after is None:
-        return {"S": "agent_s", "A": "agent_a", "B": "agent_b", "C": "agent_c"}.get(active_agents[0], END) if active_agents else END
+        return mapping.get(active_agents[0], END) if active_agents else END
 
     passed_current = False
     for agent in AGENT_ORDER:
@@ -75,7 +72,7 @@ def _next_active_agent(active_agents: list[AgentId], after: AgentId | None = Non
             passed_current = True
             continue
         if passed_current and agent in active_agents:
-            return {"S": "agent_s", "A": "agent_a", "B": "agent_b", "C": "agent_c"}[agent]
+            return mapping[agent]
     return END
 
 
@@ -84,10 +81,18 @@ def _route_after(after: AgentId | None = None) -> Callable[[CouncilState], str]:
         active_agents = state.get("active_agents", DEFAULT_ACTIVE_AGENTS)
         next_node = _next_active_agent(active_agents, after=after)
         if next_node == END:
-            return "summarizer" if len(state.get("messages", [])) > 10 else END
+            return "judge" if state.get("enable_judge", True) else "decision_memory"
         return next_node
 
     return route
+
+
+def _route_after_judge(_: CouncilState) -> str:
+    return "decision_memory"
+
+
+def _route_after_decision_memory(state: CouncilState) -> str:
+    return "summarizer" if len(state.get("messages", [])) > 10 else END
 
 
 def build_graph(
@@ -96,6 +101,8 @@ def build_graph(
     team_name: str = "",
     selected_skills: dict[AgentId, str] | None = None,
     prompt_overrides: dict[AgentId, str] | None = None,
+    judge_prompt: str = "",
+    output_protocol_prompt: str = "",
 ):
     configure_agents(
         settings=settings,
@@ -103,6 +110,8 @@ def build_graph(
         team_name=team_name,
         selected_skills=selected_skills,
         prompt_overrides=prompt_overrides,
+        judge_prompt=judge_prompt,
+        output_protocol_prompt=output_protocol_prompt,
     )
 
     builder = StateGraph(CouncilState)
@@ -111,34 +120,64 @@ def build_graph(
     builder.add_node("agent_a", node_agent_a)
     builder.add_node("agent_b", node_agent_b)
     builder.add_node("agent_c", node_agent_c)
+    builder.add_node("judge", node_judge)
+    builder.add_node("decision_memory", node_update_decision_memory)
     builder.add_node("summarizer", node_summarizer)
 
     builder.add_edge(START, "router")
     builder.add_conditional_edges(
         "router",
         _route_after(),
-        {"agent_s": "agent_s", "agent_a": "agent_a", "agent_b": "agent_b", "agent_c": "agent_c", "summarizer": "summarizer", END: END},
+        {
+            "agent_s": "agent_s",
+            "agent_a": "agent_a",
+            "agent_b": "agent_b",
+            "agent_c": "agent_c",
+            "judge": "judge",
+            "decision_memory": "decision_memory",
+            END: END,
+        },
     )
     builder.add_conditional_edges(
         "agent_s",
         _route_after(after="S"),
-        {"agent_a": "agent_a", "agent_b": "agent_b", "agent_c": "agent_c", "summarizer": "summarizer", END: END},
+        {
+            "agent_a": "agent_a",
+            "agent_b": "agent_b",
+            "agent_c": "agent_c",
+            "judge": "judge",
+            "decision_memory": "decision_memory",
+            END: END,
+        },
     )
     builder.add_conditional_edges(
         "agent_a",
         _route_after(after="A"),
-        {"agent_b": "agent_b", "agent_c": "agent_c", "summarizer": "summarizer", END: END},
+        {
+            "agent_b": "agent_b",
+            "agent_c": "agent_c",
+            "judge": "judge",
+            "decision_memory": "decision_memory",
+            END: END,
+        },
     )
     builder.add_conditional_edges(
         "agent_b",
         _route_after(after="B"),
-        {"agent_c": "agent_c", "summarizer": "summarizer", END: END},
+        {
+            "agent_c": "agent_c",
+            "judge": "judge",
+            "decision_memory": "decision_memory",
+            END: END,
+        },
     )
     builder.add_conditional_edges(
         "agent_c",
         _route_after(after="C"),
-        {"summarizer": "summarizer", END: END},
+        {"judge": "judge", "decision_memory": "decision_memory", END: END},
     )
+    builder.add_conditional_edges("judge", _route_after_judge, {"decision_memory": "decision_memory"})
+    builder.add_conditional_edges("decision_memory", _route_after_decision_memory, {"summarizer": "summarizer", END: END})
     builder.add_edge("summarizer", END)
 
     return builder.compile(checkpointer=MemorySaver())

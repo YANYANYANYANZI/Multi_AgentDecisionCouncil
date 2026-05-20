@@ -1,16 +1,19 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import RichTextBlock from './RichTextBlock.vue'
-import type { AgentSpec, PendingRound, RoundRecord, UploadedDoc } from '../types'
+import type { AgentSpec, DecisionMemory, PendingRound, RoundMode, RoundRecord, WorkspaceDocument } from '../types'
 
 const props = defineProps<{
   projectName: string
   rounds: RoundRecord[]
   summary: string
+  compactContext: string
   agentSpecs: Record<'S' | 'A' | 'B' | 'C', AgentSpec>
-  uploadedDocs: UploadedDoc[]
+  uploadedDocs: WorkspaceDocument[]
   loading: boolean
   pendingRound: PendingRound | null
+  decisionMemory: DecisionMemory
+  roundMode: RoundMode
 }>()
 
 const latestRoundIndex = computed(() => props.rounds.length - 1)
@@ -41,11 +44,11 @@ function pendingMessageError(round: RoundRecord | PendingRound, agentId: string)
       <div>
         <div class="eyebrow">Council</div>
         <h2>{{ projectName }}</h2>
-        <p>讨论、结论与摘要统一沉淀。</p>
+        <p>当前模式：{{ roundMode }}。讨论、收敛和记忆在同一工作区沉淀。</p>
       </div>
       <div class="hero-meta">
         <span>{{ rounds.length }} 轮归档</span>
-        <span>{{ uploadedDocs.length }} 份资料挂载</span>
+        <span>{{ uploadedDocs.length }} 份文档</span>
       </div>
     </section>
 
@@ -57,15 +60,48 @@ function pendingMessageError(round: RoundRecord | PendingRound, agentId: string)
       <RichTextBlock :content="summary" />
     </section>
 
+    <section v-if="compactContext" class="summary-card">
+      <div class="section-header">
+        <h3>Compact Context</h3>
+        <span>压缩后上下文</span>
+      </div>
+      <RichTextBlock :content="compactContext" />
+    </section>
+
+    <section class="summary-card">
+      <div class="section-header">
+        <h3>决策记忆</h3>
+        <span>{{ decisionMemory.updated_at || '未更新' }}</span>
+      </div>
+      <div class="doc-grid">
+        <article class="doc-card">
+          <strong>已确认决策</strong>
+          <p>{{ decisionMemory.decisions.join(' / ') || '暂无' }}</p>
+        </article>
+        <article class="doc-card">
+          <strong>已否决方案</strong>
+          <p>{{ decisionMemory.rejected_options.join(' / ') || '暂无' }}</p>
+        </article>
+        <article class="doc-card">
+          <strong>下一步动作</strong>
+          <p>{{ decisionMemory.next_actions.join(' / ') || '暂无' }}</p>
+        </article>
+        <article class="doc-card">
+          <strong>未解决问题</strong>
+          <p>{{ decisionMemory.open_questions.join(' / ') || '暂无' }}</p>
+        </article>
+      </div>
+    </section>
+
     <section v-if="uploadedDocs.length" class="summary-card">
       <div class="section-header">
-        <h3>上下文资料</h3>
+        <h3>已挂载文档</h3>
         <span>{{ uploadedDocs.length }} 个文件</span>
       </div>
       <div class="doc-grid">
-        <article v-for="doc in uploadedDocs" :key="doc.name" class="doc-card">
+        <article v-for="doc in uploadedDocs" :key="doc.doc_id" class="doc-card">
           <strong>{{ doc.name }}</strong>
-          <p>{{ doc.content.slice(0, 220) }}</p>
+          <p>{{ (doc.content || '').slice(0, 220) }}</p>
         </article>
       </div>
     </section>
@@ -129,6 +165,13 @@ function pendingMessageError(round: RoundRecord | PendingRound, agentId: string)
           <div v-if="pendingMessageState(round, message.agent) === 'error'" class="message-placeholder">
             {{ pendingMessageError(round, message.agent) || '该 Agent 输出中断' }}
           </div>
+        </div>
+
+        <div v-if="round.judge_message" class="message judge-message">
+          <div class="message-meta">
+            <div class="message-role judge-title">Judge · 裁判收敛</div>
+          </div>
+          <RichTextBlock :content="round.judge_message.content || round.judge_message.error || 'Judge 执行中…'" />
         </div>
       </article>
     </section>

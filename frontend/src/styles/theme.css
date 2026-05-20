@@ -485,6 +485,40 @@ button {
   overflow: auto;
 }
 
+.toggle-row {
+  display: flex !important;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.toggle-row input[type='checkbox'],
+.composer-toggle input[type='checkbox'] {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--accent);
+}
+
+.document-list {
+  display: grid;
+  gap: 8px;
+}
+
+.document-item {
+  display: block !important;
+}
+
+.document-meta {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 8px;
+  align-items: center;
+}
+
+.document-editor {
+  display: grid;
+  gap: 10px;
+}
+
 .saved-session-item {
   min-width: 0;
   display: grid;
@@ -865,11 +899,31 @@ button {
   white-space: nowrap;
 }
 
+.composer-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 10px;
+  border-radius: 999px;
+}
+
 .composer-row {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr) auto;
   gap: 10px;
   align-items: end;
+}
+
+.composer-row-slim {
+  grid-template-columns: auto minmax(0, 1fr) auto;
+}
+
+.composer-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+  justify-content: flex-end;
 }
 
 .composer-input {
@@ -911,10 +965,26 @@ button {
   padding: 8px;
   display: grid;
   gap: 4px;
-  border: 1px solid var(--panel-border);
   border-radius: 16px;
-  background: var(--panel-bg-strong);
-  box-shadow: var(--shadow-soft);
+}
+
+.plus-menu-solid {
+  border: 1px solid var(--panel-border);
+  background: color-mix(in srgb, var(--panel-bg-strong) 94%, black);
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.28);
+  backdrop-filter: blur(12px);
+  z-index: 1200;
+  pointer-events: auto;
+}
+
+[data-theme='light'] .plus-menu-solid {
+  background: rgba(255, 255, 255, 0.97);
+}
+
+.mode-menu {
+  left: auto;
+  right: 0;
+  width: 140px;
 }
 
 .plus-menu button {
@@ -927,6 +997,15 @@ button {
 
 .plus-menu button:hover {
   background: rgba(255, 255, 255, 0.075);
+}
+
+.judge-message {
+  border: 1px solid rgba(124, 140, 255, 0.28);
+  background: rgba(124, 140, 255, 0.08);
+}
+
+.judge-title {
+  color: var(--accent);
 }
 
 .hidden-input {
@@ -964,6 +1043,10 @@ select:disabled {
 
   .dock-models {
     display: none;
+  }
+
+  .composer-actions {
+    justify-content: stretch;
   }
 }
 

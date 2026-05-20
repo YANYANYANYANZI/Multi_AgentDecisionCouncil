@@ -1,10 +1,9 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
-import type { ModelOption, RuntimeConfig } from '../types'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import type { RoundMode, RuntimeConfig } from '../types'
 
 const props = defineProps<{
   config: RuntimeConfig
-  models: ModelOption[]
   interventions: Record<string, string>
   isBusy: boolean
   roundState: 'idle' | 'running' | 'paused'
@@ -13,29 +12,36 @@ const props = defineProps<{
 const emit = defineEmits<{
   send: [prompt: string]
   continueRound: []
-  autoRound: [prompt: string]
   terminateRound: []
   attachFiles: [files: File[]]
   exportMarkdown: []
+  setRoundMode: [mode: RoundMode]
+  compressContext: []
 }>()
 
 const draft = ref('')
 const menuOpen = ref(false)
+const modeMenuOpen = ref(false)
 const fileInput = ref<HTMLInputElement | null>(null)
-const agentIds = ['S', 'A', 'B', 'C'] as const
+const plusWrapper = ref<HTMLElement | null>(null)
+const modeWrapper = ref<HTMLElement | null>(null)
 
-const enabledAgents = computed(() =>
-  agentIds.filter((agentId) => props.config.agents[agentId].enabled)
-)
 const canSubmit = computed(() => props.roundState === 'idle' && !props.isBusy && Boolean(draft.value.trim()))
 const canTerminate = computed(() => props.roundState !== 'idle')
 const canContinue = computed(() => props.roundState === 'paused' && !props.isBusy)
-const canAuto = computed(() => {
-  if (props.roundState === 'idle') {
-    return !props.isBusy && Boolean(draft.value.trim())
+
+function closeMenus(event: MouseEvent) {
+  const target = event.target as Node
+  if (plusWrapper.value && !plusWrapper.value.contains(target)) {
+    menuOpen.value = false
   }
-  return props.roundState === 'paused' && !props.isBusy
-})
+  if (modeWrapper.value && !modeWrapper.value.contains(target)) {
+    modeMenuOpen.value = false
+  }
+}
+
+onMounted(() => document.addEventListener('click', closeMenus))
+onBeforeUnmount(() => document.removeEventListener('click', closeMenus))
 
 function submit() {
   const value = draft.value.trim()
@@ -44,21 +50,9 @@ function submit() {
   draft.value = ''
 }
 
-function autoSubmit() {
-  const value = draft.value.trim()
-  if (!canSubmit.value) return
-  emit('autoRound', value)
-  draft.value = ''
-}
-
 function terminate() {
   if (!canTerminate.value) return
   emit('terminateRound')
-}
-
-function continueRound() {
-  if (!canContinue.value) return
-  emit('continueRound')
 }
 
 function triggerAttach() {
@@ -75,9 +69,9 @@ function onFileChange(event: Event) {
   target.value = ''
 }
 
-function useIntervention(key: string) {
-  draft.value = props.interventions[key]
-  menuOpen.value = false
+function applyMode(mode: RoundMode) {
+  emit('setRoundMode', mode)
+  modeMenuOpen.value = false
 }
 </script>
 
@@ -87,33 +81,25 @@ function useIntervention(key: string) {
       <div class="dock-toolbar">
         <div class="dock-status">
           <span class="eyebrow">输入</span>
-          <strong>本轮：{{ enabledAgents.join(' / ') || '未启用' }}</strong>
+          <strong>{{ config.auto_mode ? '自动模式已启用' : `当前模式：${config.round_mode}` }}</strong>
         </div>
         <div class="dock-models">
-          <span v-for="agentId in enabledAgents" :key="agentId">
-            {{ agentId }} · {{ models.find((model) => model.id === config.agents[agentId].model)?.label || '未配置' }}
-          </span>
+          <label class="trace-item composer-toggle">
+            <input v-model="config.auto_mode" type="checkbox" />
+            <span>自动模式</span>
+          </label>
         </div>
       </div>
 
-      <div class="composer-row">
-        <div class="plus-wrapper">
-          <button class="plus-button" :disabled="isBusy" @click="menuOpen = !menuOpen">+</button>
-          <div v-if="menuOpen" class="plus-menu">
-            <button @click="triggerAttach">添加文件</button>
-            <button @click="useIntervention('overdesign')">反过度设计</button>
-            <button @click="useIntervention('common_sense')">工程红线</button>
-            <button @click="useIntervention('catastrophe')">风险视角</button>
+      <div class="composer-row composer-row-slim">
+        <div ref="plusWrapper" class="plus-wrapper">
+          <button class="plus-button" :disabled="isBusy" @click.stop="menuOpen = !menuOpen">+</button>
+          <div v-if="menuOpen" class="plus-menu plus-menu-solid" @click.stop>
+            <button @click="triggerAttach">添加文档</button>
+            <button @click="emit('compressContext'); menuOpen = false">压缩上下文</button>
             <button @click="emit('exportMarkdown'); menuOpen = false">导出</button>
           </div>
-          <input
-            ref="fileInput"
-            class="hidden-input"
-            type="file"
-            multiple
-            accept=".txt,.md,.pdf,.docx,.csv,.json,.yaml,.yml"
-            @change="onFileChange"
-          />
+          <input ref="fileInput" class="hidden-input" type="file" multiple accept=".txt,.md,.pdf,.docx,.csv,.json,.yaml,.yml" @change="onFileChange" />
         </div>
 
         <textarea
@@ -121,25 +107,27 @@ function useIntervention(key: string) {
           class="composer-input"
           rows="1"
           :disabled="isBusy || roundState !== 'idle'"
-          placeholder="输入指令，Enter 发送"
+          placeholder="直接输入问题即可；默认会自动选择讨论模式。"
           @keydown.enter.exact.prevent="submit"
         />
 
-        <button
-          class="send-button"
-          :disabled="roundState === 'idle' ? !canSubmit : !canTerminate"
-          @click="roundState === 'idle' ? submit() : terminate()"
-        >
-          {{ roundState === 'idle' ? '发送' : '终止' }}
-        </button>
-        <button class="send-button secondary-action" :disabled="!canContinue" @click="continueRound">继续</button>
-        <button
-          class="send-button secondary-action"
-          :disabled="!canAuto"
-          @click="roundState === 'paused' ? emit('autoRound', '') : autoSubmit()"
-        >
-          自动
-        </button>
+        <div class="composer-actions">
+          <button class="send-button secondary-action" :disabled="props.isBusy" @click="emit('compressContext')">压缩上下文</button>
+          <button class="send-button secondary-action" :disabled="!canContinue" @click="emit('continueRound')">继续</button>
+          <button class="send-button" :disabled="roundState === 'idle' ? !canSubmit : !canTerminate" @click="roundState === 'idle' ? submit() : terminate()">
+            {{ roundState === 'idle' ? '发送' : '终止' }}
+          </button>
+          <div ref="modeWrapper" class="plus-wrapper">
+            <button class="send-button secondary-action" type="button" @click.stop="modeMenuOpen = !modeMenuOpen">模式</button>
+            <div v-if="modeMenuOpen" class="plus-menu plus-menu-solid mode-menu" @click.stop>
+              <button @click="applyMode('auto')">自动</button>
+              <button @click="applyMode('converge')">收敛</button>
+              <button @click="applyMode('critique')">挑刺</button>
+              <button @click="applyMode('execute')">执行</button>
+              <button @click="applyMode('diverge')">发散</button>
+            </div>
+          </div>
+        </div>
       </div>
     </div>
   </div>
