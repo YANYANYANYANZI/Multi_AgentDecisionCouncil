@@ -53,14 +53,17 @@ function isAgentAvailable(agentId: AgentId) {
     </section>
 
     <section class="sidebar-card">
-      <div class="section-header">
+      <div class="section-header project-settings-header">
         <h2>项目设置</h2>
-        <span>基础输入</span>
       </div>
-      <label>
+      <label class="project-name-inline">
         <span>项目名</span>
         <input v-model="config.project_name" type="text" placeholder="未命名议题" />
       </label>
+      <div class="project-actions-row">
+        <button class="primary-button project-action-button" :disabled="isBusy" @click="emit('createSession')">新建</button>
+        <button class="ghost-button project-action-button" :disabled="isBusy" @click="emit('saveSession')">保存</button>
+      </div>
       <label>
         <span>预设提示词</span>
         <textarea v-model="config.preset_prompt" rows="4" />
@@ -166,10 +169,6 @@ function isAgentAvailable(agentId: AgentId) {
       <div class="section-header">
         <h2>会话存档</h2>
         <span>{{ savedSessions.length }} 份</span>
-      </div>
-      <div class="session-actions">
-        <button class="primary-button" :disabled="isBusy" @click="emit('createSession')">新建</button>
-        <button class="ghost-button" :disabled="isBusy" @click="emit('saveSession')">保存</button>
       </div>
       <div class="saved-session-list">
         <div v-for="file in savedSessions" :key="`saved-${file}`" class="saved-session-item">

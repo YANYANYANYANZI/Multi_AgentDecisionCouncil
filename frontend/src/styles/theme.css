@@ -180,6 +180,27 @@ select {
   font-size: 12px;
 }
 
+.project-settings-header {
+  margin-bottom: 12px;
+}
+
+.project-name-inline {
+  min-width: 0;
+  display: grid;
+  gap: 6px;
+}
+
+.project-actions-row {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.project-action-button {
+  width: 100%;
+}
+
 .agent-orchestration-card {
   padding: 14px;
 }
