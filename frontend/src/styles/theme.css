@@ -219,6 +219,34 @@ select {
   background: rgba(255, 255, 255, 0.04);
 }
 
+.agent-row-card-collapsible {
+  gap: 10px;
+  display: grid;
+}
+
+.agent-summary-button {
+  width: 100%;
+  padding: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+}
+
+.agent-summary-meta {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding-left: 30px;
+}
+
+.agent-summary-meta span {
+  padding: 4px 8px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.055);
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
 .agent-topline {
   align-items: center;
   column-gap: 10px;
@@ -296,6 +324,12 @@ select {
 .agent-control-stack {
   display: grid;
   gap: 10px;
+}
+
+.agent-config-section {
+  display: grid;
+  gap: 10px;
+  margin-top: 6px;
 }
 
 .field-compact {

@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { computed } from 'vue'
-import type { AgentSpec, ModelOption, RuntimeConfig, SkillOption, WorkspaceDocument, WorkspaceSummary } from '../types'
+import { computed, nextTick, ref } from 'vue'
+import type { AgentId, AgentSpec, ModelOption, RuntimeConfig, SkillOption, WorkspaceDocument, WorkspaceSummary } from '../types'
 
 const props = defineProps<{
   config: RuntimeConfig
@@ -38,10 +38,29 @@ const emit = defineEmits<{
   updateActiveDocument: [document: WorkspaceDocument]
 }>()
 
-const agentIds = ['S', 'A', 'B', 'C'] as const
+const agentIds: AgentId[] = ['S', 'A', 'B', 'C']
 const taskTypeOptions = ['general', 'startup_validation', 'product_design', 'engineering_review', 'research_brainstorm', 'business_plan', 'ui_review', 'personal_decision']
+const advancedDetails = ref<HTMLDetailsElement | null>(null)
+const agentSection = ref<HTMLElement | null>(null)
+const expandedAgents = ref<Record<AgentId, boolean>>({
+  S: false,
+  A: false,
+  B: false,
+  C: false,
+})
+
 const enabledAgentCount = computed(() => agentIds.filter((agentId) => props.config.agents[agentId].enabled).length)
 const currentModelLabel = computed(() => props.models.find((item) => item.id === props.config.agents.S.model)?.label || '未配置模型')
+
+function isAgentAvailable(agentId: AgentId) {
+  const agent = props.config.agents[agentId]
+  return agent.enabled && Boolean(props.availability[agent.model])
+}
+
+function agentStatusText(agentId: AgentId) {
+  if (!props.config.agents[agentId].enabled) return '未启用'
+  return isAgentAvailable(agentId) ? '可用' : '待验证'
+}
 
 function onTeamChange(event: Event) {
   emit('changeTeam', (event.target as HTMLSelectElement).value)
@@ -58,6 +77,18 @@ function onDocumentChange(event: Event) {
     content: (event.target as HTMLTextAreaElement).value,
   })
 }
+
+function toggleAgent(agentId: AgentId) {
+  expandedAgents.value[agentId] = !expandedAgents.value[agentId]
+}
+
+async function openAgentEditor() {
+  if (advancedDetails.value && !advancedDetails.value.open) {
+    advancedDetails.value.open = true
+  }
+  await nextTick()
+  agentSection.value?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+}
 </script>
 
 <template>
@@ -65,7 +96,7 @@ function onDocumentChange(event: Event) {
     <section class="sidebar-card sidebar-card-hero">
       <div class="eyebrow">Workspace</div>
       <h1>默认可用的决策工作台</h1>
-      <p>首屏只保留全局约束和 Judge 标准，其他配置全部下沉。</p>
+      <p>首屏只保留全局约束和 Judge 标准，Agent 配置收纳到高级设置。</p>
       <div class="status-row">
         <button class="ghost-button" :disabled="isBusy" @click="emit('refreshModels')">刷新模型</button>
         <button class="theme-button" type="button" @click="emit('toggleTheme')">
@@ -121,16 +152,18 @@ function onDocumentChange(event: Event) {
     <section class="sidebar-card">
       <div class="section-header">
         <h2>智能默认配置</h2>
+        <button class="ghost-button" type="button" @click="openAgentEditor">编辑 Agent</button>
       </div>
       <div class="trace-list">
         <div class="trace-item">团队：{{ config.team_name || activeTeam }}</div>
         <div class="trace-item">模型：{{ currentModelLabel }}</div>
         <div class="trace-item">Judge：{{ config.enable_judge ? '已启用' : '已关闭' }}</div>
-        <div class="trace-item">自动模式：{{ config.auto_mode ? '已启用' : '手动' }}</div>
+        <div class="trace-item">自动模式：{{ config.auto_mode ? '已启用' : '已关闭' }}</div>
+        <div class="trace-item">Agent：已启用 {{ enabledAgentCount }}/4</div>
       </div>
     </section>
 
-    <details class="sidebar-card sidebar-details">
+    <details ref="advancedDetails" class="sidebar-card sidebar-details">
       <summary class="details-summary">
         <span>高级设置</span>
         <span>默认折叠</span>
@@ -207,24 +240,36 @@ function onDocumentChange(event: Event) {
           <textarea v-model="config.task_brief.expected_output" rows="2" />
         </label>
 
-        <details class="inline-details">
-          <summary class="details-summary">
-            <span>Agent 编排</span>
-            <span>{{ enabledAgentCount }}/4</span>
-          </summary>
-          <div class="details-body">
-            <article v-for="agentId in agentIds" :key="agentId" class="agent-row-card">
-              <div class="agent-topline">
-                <label class="agent-enable">
-                  <input v-model="config.agents[agentId].enabled" class="agent-enable-checkbox" type="checkbox" />
-                </label>
-                <div class="agent-identity">
-                  <span class="agent-code">{{ agentId }}</span>
-                  <span class="agent-dot">·</span>
-                  <span class="agent-title" :style="{ color: agentSpecs[agentId].color }">{{ agentSpecs[agentId].display_name }}</span>
+        <section ref="agentSection" class="agent-config-section">
+          <div class="section-header compact-section-header">
+            <h3>Agent 编排</h3>
+            <span>可完整编辑 S/A/B/C</span>
+          </div>
+          <div class="agent-stack">
+            <article v-for="agentId in agentIds" :key="agentId" class="agent-row-card agent-row-card-collapsible">
+              <button class="agent-summary-button" type="button" @click="toggleAgent(agentId)">
+                <div class="agent-topline">
+                  <label class="agent-enable">
+                    <input v-model="config.agents[agentId].enabled" class="agent-enable-checkbox" type="checkbox" @click.stop />
+                  </label>
+                  <div class="agent-identity">
+                    <span class="agent-code">{{ agentId }}</span>
+                    <span class="agent-dot">·</span>
+                    <span class="agent-title" :style="{ color: agentSpecs[agentId].color }">{{ agentSpecs[agentId].display_name }}</span>
+                  </div>
+                  <span class="agent-availability" :class="{ 'is-offline': !config.agents[agentId].enabled || !isAgentAvailable(agentId) }">
+                    <i />
+                    {{ agentStatusText(agentId) }}
+                  </span>
                 </div>
-              </div>
-              <div class="agent-control-stack">
+                <div class="agent-summary-meta">
+                  <span>{{ config.agents[agentId].model || '未配置模型' }}</span>
+                  <span>{{ config.agents[agentId].skill_id || '未选择 skill' }}</span>
+                  <span>{{ expandedAgents[agentId] ? '收起' : '展开' }}</span>
+                </div>
+              </button>
+
+              <div v-if="expandedAgents[agentId]" class="agent-control-stack">
                 <label class="field-compact">
                   <span>模型</span>
                   <select v-model="config.agents[agentId].model">
@@ -232,19 +277,22 @@ function onDocumentChange(event: Event) {
                   </select>
                 </label>
                 <label class="field-compact">
-                  <span>Skill</span>
+                  <span>提示词人设</span>
                   <select v-model="config.agents[agentId].skill_id">
-                    <option v-for="skill in skills[agentId]" :key="skill.skill_id" :value="skill.skill_id">{{ skill.name }}</option>
+                    <option value="">未选择</option>
+                    <option v-for="skill in skills[agentId]" :key="skill.skill_id" :value="skill.skill_id">
+                      {{ skill.name }}{{ skill.is_latest ? ' · 最新' : ` · v${skill.version}` }}
+                    </option>
                   </select>
                 </label>
                 <label class="field-compact">
                   <span>局部 Prompt</span>
-                  <textarea v-model="config.agents[agentId].prompt" rows="2" />
+                  <textarea v-model="config.agents[agentId].prompt" rows="3" placeholder="可选覆盖" />
                 </label>
               </div>
             </article>
           </div>
-        </details>
+        </section>
 
         <details class="inline-details">
           <summary class="details-summary">
