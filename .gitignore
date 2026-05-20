@@ -10,4 +10,6 @@ sessions/*
 !sessions/.gitkeep
 
 .vscode/
-
+launch_terminal_start.sh
+launch_terminal_stop.sh
+.runtime/

@@ -181,82 +181,82 @@ select {
 }
 
 .agent-orchestration-card {
-  padding: 12px;
+  padding: 14px;
 }
 
 .agent-stack {
   display: grid;
-  gap: 9px;
+  gap: 10px;
 }
 
 .agent-row-card {
-  min-width: 0;
-  padding: 11px;
-  border: 1px solid var(--panel-border);
-  border-radius: var(--radius-md);
-  background: rgba(255, 255, 255, 0.035);
-}
-
-.agent-mainline {
   width: 100%;
   min-width: 0;
-  display: flex;
+  padding: 12px;
+  border: 1px solid var(--panel-border);
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.agent-topline {
   align-items: center;
-  gap: 8px;
-  margin-bottom: 9px;
-  flex-wrap: nowrap;
+  column-gap: 10px;
+  display: grid;
+  grid-template-columns: 20px minmax(0, 1fr) auto;
+  margin-bottom: 12px;
+}
+
+.agent-enable {
+  width: 20px;
+  height: 20px;
+  display: grid;
+  place-items: center;
+}
+
+.agent-enable-checkbox {
+  width: 16px !important;
+  height: 16px !important;
+  min-width: 16px !important;
+  flex: 0 0 16px;
+  margin: 0;
+  padding: 0;
+  accent-color: var(--accent);
   cursor: pointer;
 }
 
-.agent-checkline {
+.agent-identity {
   min-width: 0;
   display: flex;
   align-items: center;
-  gap: 6px;
-  overflow: hidden;
-  flex: 1 1 auto;
+  gap: 5px;
+  font-size: 14px;
+  font-weight: 800;
+  letter-spacing: -0.01em;
 }
 
-.agent-checkline input {
+.agent-code {
   flex: 0 0 auto;
-  width: 14px;
-  height: 14px;
-  margin: 0;
+  color: var(--text-main);
 }
 
-.agent-name {
-  min-width: 0;
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  font-weight: 700;
-  font-size: 13px;
-}
-
-.agent-avatar {
+.agent-dot {
   flex: 0 0 auto;
-}
-
-.agent-title {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  color: var(--text-soft);
 }
 
 .agent-availability {
-  flex: 0 0 auto;
   height: 24px;
-  padding: 0 8px;
+  padding: 0 9px;
   display: inline-flex;
   align-items: center;
-  gap: 5px;
+  gap: 6px;
   border-radius: 999px;
-  border: 1px solid rgba(56, 217, 150, 0.26);
+  border: 1px solid rgba(56, 217, 150, 0.28);
   background: rgba(56, 217, 150, 0.1);
   color: var(--success);
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 700;
+  white-space: nowrap;
 }
 
 .agent-availability i {
@@ -272,22 +272,21 @@ select {
   color: var(--warning);
 }
 
-.agent-control-grid {
-  min-width: 0;
+.agent-control-stack {
   display: grid;
-  gap: 8px;
+  gap: 10px;
 }
 
 .field-compact {
   min-width: 0;
   display: grid;
-  gap: 5px;
+  gap: 6px;
 }
 
 .field-compact > span,
 .sidebar label > span {
   color: var(--text-soft);
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 700;
 }
 
@@ -297,7 +296,7 @@ select {
   gap: 6px;
 }
 
-.sidebar input,
+.sidebar input:not([type='checkbox']),
 .sidebar textarea,
 .sidebar select,
 .composer-input {
@@ -310,7 +309,7 @@ select {
   outline: none;
 }
 
-.sidebar input,
+.sidebar input:not([type='checkbox']),
 .sidebar select {
   height: 36px;
   padding: 0 10px;
@@ -325,6 +324,26 @@ select {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.field-compact select {
+  width: 100%;
+  min-width: 0;
+  height: 42px;
+  padding: 0 12px;
+  border-radius: 14px;
+  border: 1px solid var(--panel-border);
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--text-main);
+  font-size: 14px;
+  font-weight: 650;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.field-compact select option {
+  color: #111827;
 }
 
 .summary-model-field {

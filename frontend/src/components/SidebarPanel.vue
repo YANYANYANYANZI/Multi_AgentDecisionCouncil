@@ -91,22 +91,33 @@ function isAgentAvailable(agentId: AgentId) {
 
       <div class="agent-stack">
         <article v-for="agentId in agentIds" :key="agentId" class="agent-row-card">
-          <label class="agent-mainline">
-            <span class="agent-checkline">
-              <input v-model="config.agents[agentId].enabled" type="checkbox" />
-              <span class="agent-name" :style="{ color: agentSpecs[agentId].color }">
-                <span class="agent-avatar">{{ agentSpecs[agentId].avatar }}</span>
-                <span class="agent-title">{{ agentSpecs[agentId].display_name }}</span>
+          <div class="agent-topline">
+            <label class="agent-enable">
+              <input
+                v-model="config.agents[agentId].enabled"
+                class="agent-enable-checkbox"
+                type="checkbox"
+              />
+            </label>
+
+            <div class="agent-identity">
+              <span class="agent-code">{{ agentId }}</span>
+              <span class="agent-dot">·</span>
+              <span
+                class="agent-title"
+                :style="{ color: agentSpecs[agentId].color }"
+              >
+                {{ agentSpecs[agentId].display_name.replace(`${agentId}·`, '') }}
               </span>
-            </span>
+            </div>
 
             <span class="agent-availability" :class="{ 'is-offline': !isAgentAvailable(agentId) }">
               <i />
               {{ isAgentAvailable(agentId) ? '可用' : '未探测' }}
             </span>
-          </label>
+          </div>
 
-          <div class="agent-control-grid">
+          <div class="agent-control-stack">
             <label class="field-compact">
               <span>模型</span>
               <select v-model="config.agents[agentId].model">
@@ -117,7 +128,7 @@ function isAgentAvailable(agentId: AgentId) {
             </label>
 
             <label class="field-compact">
-              <span>技能</span>
+              <span>提示词人设</span>
               <select v-model="config.agents[agentId].skill_id">
                 <option v-for="skill in skills[agentId]" :key="skill.skill_id" :value="skill.skill_id">
                   {{ skill.name }}{{ skill.is_latest ? ' · 最新' : ` · v${skill.version}` }}
