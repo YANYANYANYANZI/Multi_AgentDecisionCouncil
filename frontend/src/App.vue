@@ -14,6 +14,7 @@ const config = reactive<RuntimeConfig>({
   deepseek_api_key: '',
   ark_api_key: '',
   summary_model: '',
+  team_name: 'mvp_hacker_team',
   agents: {
     S: { enabled: true, model: '', skill_id: '', prompt: '' },
     A: { enabled: true, model: '', skill_id: '', prompt: '' },
@@ -64,10 +65,27 @@ function snapshotConfig(): RuntimeConfig {
   return JSON.parse(JSON.stringify(config)) as RuntimeConfig
 }
 
-function applyDefaults(payload: BootstrapPayload) {
+function applyDefaults(
+  payload: BootstrapPayload,
+  options: { preserveRuntime?: boolean } = {},
+) {
+  const preserved = options.preserveRuntime
+    ? {
+        projectName: config.project_name,
+        deepseekApiKey: config.deepseek_api_key,
+        arkApiKey: config.ark_api_key,
+        uploadedDocs: [...config.uploaded_docs],
+      }
+    : null
   bootstrap.value = payload
   session.value = payload.session
   Object.assign(config, JSON.parse(JSON.stringify(payload.defaults)))
+  if (preserved) {
+    config.project_name = preserved.projectName
+    config.deepseek_api_key = preserved.deepseekApiKey
+    config.ark_api_key = preserved.arkApiKey
+    config.uploaded_docs = preserved.uploadedDocs
+  }
   if (!config.summary_model && payload.available_models.length) {
     config.summary_model = payload.available_models[0].id
   }
@@ -98,18 +116,27 @@ async function refreshSavedSessions() {
   }
 }
 
-async function loadBootstrap() {
+async function loadBootstrap(teamName?: string, preserveRuntime = false) {
   loading.value = true
   errorMessage.value = ''
   try {
-    const payload = await councilApi.bootstrap()
-    applyDefaults(payload)
+    const payload = await councilApi.bootstrap(teamName)
+    applyDefaults(payload, { preserveRuntime })
     await refreshSavedSessions()
   } catch (error) {
     errorMessage.value = error instanceof Error ? error.message : '初始化失败'
   } finally {
     loading.value = false
   }
+}
+
+async function changeTeam(teamName: string) {
+  if (roundState.value !== 'idle') {
+    errorMessage.value = '请先终止或完成当前轮次，再切换团队。'
+    return
+  }
+  config.team_name = teamName
+  await loadBootstrap(teamName, true)
 }
 
 function createPendingRound(prompt: string) {
@@ -471,10 +498,13 @@ onMounted(() => {
       :models="bootstrap.available_models.length ? bootstrap.available_models : bootstrap.models"
       :availability="bootstrap.availability"
       :agent-specs="bootstrap.agent_specs"
+      :available-teams="bootstrap.available_teams"
+      :active-team="bootstrap.active_team"
       :saved-sessions="savedSessions"
       :is-busy="loading"
       :theme="theme"
       :skills="bootstrap.skills"
+      @change-team="changeTeam"
       @refresh-models="refreshModels"
       @create-session="createSession"
       @save-session="saveSession"

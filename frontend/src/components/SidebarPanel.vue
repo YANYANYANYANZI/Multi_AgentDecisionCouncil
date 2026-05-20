@@ -8,6 +8,8 @@ const props = defineProps<{
   availability: Record<string, boolean>
   agentSpecs: Record<'S' | 'A' | 'B' | 'C', AgentSpec>
   skills: Record<'S' | 'A' | 'B' | 'C', SkillOption[]>
+  availableTeams: string[]
+  activeTeam: string
   savedSessions: string[]
   isBusy: boolean
   theme: 'light' | 'dark'
@@ -17,6 +19,7 @@ const emit = defineEmits<{
   refreshModels: []
   createSession: []
   saveSession: []
+  changeTeam: [teamName: string]
   loadSession: [fileName: string]
   deleteSession: [fileName: string]
   toggleTheme: []
@@ -32,6 +35,11 @@ const enabledAgentCount = computed(() =>
 
 function isAgentAvailable(agentId: AgentId) {
   return Boolean(props.availability[props.config.agents[agentId].model])
+}
+
+function onTeamChange(event: Event) {
+  const target = event.target as HTMLSelectElement
+  emit('changeTeam', target.value)
 }
 </script>
 
@@ -56,6 +64,14 @@ function isAgentAvailable(agentId: AgentId) {
       <div class="section-header project-settings-header">
         <h2>项目设置</h2>
       </div>
+      <label>
+        <span>智能体团队</span>
+        <select :value="activeTeam" @change="onTeamChange">
+          <option v-for="teamName in availableTeams" :key="teamName" :value="teamName">
+            {{ teamName }}
+          </option>
+        </select>
+      </label>
       <label class="project-name-inline">
         <span>项目名</span>
         <input v-model="config.project_name" type="text" placeholder="未命名议题" />

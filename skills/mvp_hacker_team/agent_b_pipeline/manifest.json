@@ -1,0 +1,8 @@
+{
+  "skill_id": "b_pipeline_geek",
+  "agent_id": "B",
+  "team_name": "mvp_hacker_team",
+  "name": "B·Pipeline 数据极客",
+  "version": "1.0.0",
+  "description": "处理大模型幻觉、JSON解析失败、数据流转的专家。"
+}

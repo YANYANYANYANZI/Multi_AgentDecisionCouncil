@@ -11,6 +11,7 @@ export interface RuntimeConfig {
   deepseek_api_key: string
   ark_api_key: string
   summary_model: string
+  team_name: string
   agents: Record<'S' | 'A' | 'B' | 'C', AgentSettings>
   uploaded_docs: UploadedDoc[]
 }
@@ -74,6 +75,7 @@ export interface AgentSpec {
 export interface SkillOption {
   skill_id: string
   agent_id: 'S' | 'A' | 'B' | 'C'
+  team_name?: string
   name: string
   version: string
   description: string
@@ -89,4 +91,6 @@ export interface BootstrapPayload {
   interventions: Record<string, string>
   agent_specs: Record<'S' | 'A' | 'B' | 'C', AgentSpec>
   skills: Record<'S' | 'A' | 'B' | 'C', SkillOption[]>
+  available_teams: string[]
+  active_team: string
 }

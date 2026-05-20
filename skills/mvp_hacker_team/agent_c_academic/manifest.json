@@ -1,0 +1,8 @@
+{
+  "skill_id": "c_academic_qa",
+  "agent_id": "C",
+  "team_name": "mvp_hacker_team",
+  "name": "C·学术合规守护者",
+  "version": "1.0.0",
+  "description": "学术风控，死盯引用造假、AI痕迹过重和课件考点遗漏。"
+}

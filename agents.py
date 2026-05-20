@@ -126,6 +126,7 @@ AGENT_SPECS: dict[AgentId, AgentSpec] = {
 class AgentRuntime:
     settings: Settings
     preset_prompt: str = ""
+    team_name: str = ""
     selected_skills: dict[AgentId, str] | None = None
     prompt_overrides: dict[AgentId, str] | None = None
 
@@ -176,7 +177,7 @@ class AgentRuntime:
         ).with_config({"run_name": "Summarizer"})
 
     def prompt_for(self, agent_id: AgentId) -> str:
-        registry = SkillRegistry()
+        registry = SkillRegistry(team_name=self.team_name or None)
         skill_id = (self.selected_skills or {}).get(agent_id, "").strip()
         if skill_id:
             skill = registry.get(skill_id)
@@ -193,6 +194,7 @@ _RUNTIME: AgentRuntime | None = None
 def configure_agents(
     settings: Settings,
     preset_prompt: str = "",
+    team_name: str = "",
     selected_skills: dict[AgentId, str] | None = None,
     prompt_overrides: dict[AgentId, str] | None = None,
 ) -> None:
@@ -200,6 +202,7 @@ def configure_agents(
     _RUNTIME = AgentRuntime(
         settings=settings,
         preset_prompt=preset_prompt.strip(),
+        team_name=team_name.strip(),
         selected_skills=selected_skills or {},
         prompt_overrides=prompt_overrides or {},
     )

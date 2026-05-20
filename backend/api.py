@@ -80,6 +80,7 @@ class RuntimeConfigPayload(BaseModel):
     deepseek_api_key: str = ""
     ark_api_key: str = ""
     summary_model: str = ""
+    team_name: str = "mvp_hacker_team"
     agents: dict[str, AgentSettingsPayload]
     uploaded_docs: list[dict[str, str]] = Field(default_factory=list)
 
@@ -159,8 +160,14 @@ def _assert_model_key(model_id: str, api_key: str) -> None:
         )
 
 
-def _settings_defaults() -> dict[str, Any]:
-    SKILL_REGISTRY.reload()
+def _registry_for_team(team_name: str | None = None) -> SkillRegistry:
+    registry = SkillRegistry(team_name=team_name)
+    registry.reload()
+    return registry
+
+
+def _settings_defaults(team_name: str | None = None) -> dict[str, Any]:
+    registry = _registry_for_team(team_name)
     settings = load_settings()
     deepseek_key = (
         os.getenv("SHARED_DEEPSEEK_API_KEY", "").strip()
@@ -173,8 +180,11 @@ def _settings_defaults() -> dict[str, Any]:
         or (settings.agent_a_api_key if settings.agent_a_api_key.startswith("ark-") else "")
     )
     availability = _infer_availability(deepseek_key, ark_key)
-    agent_s_default = settings.agent_s_model if availability.get(settings.agent_s_model, False) else (
-        _default_model_for_provider("Volcengine Ark", availability) or _default_model_for_provider("DeepSeek", availability) or settings.agent_s_model
+    preferred_architect_model = "doubao-seed-2-0-pro-260215"
+    agent_s_default = preferred_architect_model if availability.get(preferred_architect_model, False) else (
+        settings.agent_s_model if availability.get(settings.agent_s_model, False) else (
+            _default_model_for_provider("Volcengine Ark", availability) or _default_model_for_provider("DeepSeek", availability) or settings.agent_s_model
+        )
     )
     agent_a_default = _default_model_for_provider("Volcengine Ark", availability) or _default_model_for_provider("DeepSeek", availability) or settings.agent_a_model
     deepseek_default = _default_model_for_provider("DeepSeek", availability) or settings.agent_b_model
@@ -188,11 +198,12 @@ def _settings_defaults() -> dict[str, Any]:
         "deepseek_api_key": deepseek_key,
         "ark_api_key": ark_key,
         "summary_model": summary_default,
+        "team_name": team_name or registry.default_team(),
         "agents": {
-            "S": {"enabled": True, "model": agent_s_default, "skill_id": (SKILL_REGISTRY.latest_for_agent("S").skill_id if SKILL_REGISTRY.latest_for_agent("S") else ""), "prompt": ""},
-            "A": {"enabled": True, "model": agent_a_default, "skill_id": (SKILL_REGISTRY.latest_for_agent("A").skill_id if SKILL_REGISTRY.latest_for_agent("A") else ""), "prompt": ""},
-            "B": {"enabled": True, "model": agent_b_default, "skill_id": (SKILL_REGISTRY.latest_for_agent("B").skill_id if SKILL_REGISTRY.latest_for_agent("B") else ""), "prompt": ""},
-            "C": {"enabled": True, "model": agent_c_default, "skill_id": (SKILL_REGISTRY.latest_for_agent("C").skill_id if SKILL_REGISTRY.latest_for_agent("C") else ""), "prompt": ""},
+            "S": {"enabled": True, "model": agent_s_default, "skill_id": (registry.latest_for_agent("S").skill_id if registry.latest_for_agent("S") else ""), "prompt": ""},
+            "A": {"enabled": bool((team_name or registry.default_team()) != "mvp_hacker_team"), "model": agent_a_default, "skill_id": (registry.latest_for_agent("A").skill_id if registry.latest_for_agent("A") else ""), "prompt": ""},
+            "B": {"enabled": True, "model": agent_b_default, "skill_id": (registry.latest_for_agent("B").skill_id if registry.latest_for_agent("B") else ""), "prompt": ""},
+            "C": {"enabled": True, "model": agent_c_default, "skill_id": (registry.latest_for_agent("C").skill_id if registry.latest_for_agent("C") else ""), "prompt": ""},
         },
     }
 
@@ -357,6 +368,7 @@ def _build_runtime_context(
     configure_agents(
         settings=settings,
         preset_prompt=payload.preset_prompt,
+        team_name=payload.team_name,
         selected_skills=selected_skills,
         prompt_overrides=prompt_overrides,
     )
@@ -434,6 +446,7 @@ async def _stream_pending_execution(session: SessionState, mode: Literal["manual
     configure_agents(
         settings=settings,
         preset_prompt=payload.preset_prompt,
+        team_name=payload.team_name,
         selected_skills={
             "S": payload.agents["S"].skill_id,
             "A": payload.agents["A"].skill_id,
@@ -599,6 +612,7 @@ async def _run_round(session: SessionState, payload: RuntimeConfigPayload, user_
     configure_agents(
         settings=settings,
         preset_prompt=payload.preset_prompt,
+        team_name=payload.team_name,
         selected_skills={
             "S": payload.agents["S"].skill_id,
             "A": payload.agents["A"].skill_id,
@@ -615,6 +629,7 @@ async def _run_round(session: SessionState, payload: RuntimeConfigPayload, user_
     graph = build_graph(
         settings=settings,
         preset_prompt=payload.preset_prompt,
+        team_name=payload.team_name,
         selected_skills={
             "S": payload.agents["S"].skill_id,
             "A": payload.agents["A"].skill_id,
@@ -681,13 +696,13 @@ async def _run_round(session: SessionState, payload: RuntimeConfigPayload, user_
     return round_record
 
 
-async def _stream_round(session: SessionState, payload: RuntimeConfigPayload, user_input: str):
+async def _stream_round(session: SessionState, request: RoundRequest):
     try:
         if session.pending_execution is not None:
             yield _sse_event("round_failed", {"detail": "当前有未结束的轮次，请先继续或终止。"})
             return
-        session.pending_execution, _ = _build_runtime_context(session, payload, user_input)
-        async for event in _stream_pending_execution(session, payload.mode, emit_start=True):
+        session.pending_execution, _ = _build_runtime_context(session, request.config, request.user_input.strip())
+        async for event in _stream_pending_execution(session, request.mode, emit_start=True):
             yield event
     except Exception as exc:
         session.pending_execution = None
@@ -700,10 +715,11 @@ def health_check() -> dict[str, str]:
 
 
 @app.get("/api/bootstrap")
-async def bootstrap() -> dict[str, Any]:
-    SKILL_REGISTRY.reload()
+async def bootstrap(team_name: str | None = None) -> dict[str, Any]:
+    registry = _registry_for_team(team_name)
     session = _empty_session()
-    defaults = _settings_defaults()
+    active_team = team_name or registry.default_team()
+    defaults = _settings_defaults(active_team)
     availability = _infer_availability(defaults["deepseek_api_key"], defaults["ark_api_key"])
     return {
         "session": _session_to_snapshot(session).model_dump(),
@@ -713,7 +729,9 @@ async def bootstrap() -> dict[str, Any]:
         "availability": availability,
         "interventions": INTERVENTIONS,
         "agent_specs": {agent_id: asdict(spec) for agent_id, spec in AGENT_SPECS.items()},
-        "skills": SKILL_REGISTRY.options_payload(),
+        "skills": registry.options_payload(),
+        "available_teams": registry.available_teams(),
+        "active_team": active_team,
     }
 
 
@@ -783,7 +801,7 @@ async def create_round_stream(session_id: str, request: RoundRequest) -> Streami
     if session is None:
         raise HTTPException(status_code=404, detail="会话不存在。")
     return StreamingResponse(
-        _stream_round(session, request.config, request.user_input.strip()),
+        _stream_round(session, request),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "Connection": "keep-alive"},
     )
@@ -830,7 +848,7 @@ def export_session(session_id: str, payload: RuntimeConfigPayload) -> dict[str, 
         agent_b_api_key=_select_api_key(payload.agents["B"].model, payload.deepseek_api_key.strip(), payload.ark_api_key.strip()),
         agent_c_api_key=_select_api_key(payload.agents["C"].model, payload.deepseek_api_key.strip(), payload.ark_api_key.strip()),
     )
-    configure_agents(settings=settings, preset_prompt=payload.preset_prompt, prompt_overrides={})
+    configure_agents(settings=settings, preset_prompt=payload.preset_prompt, team_name=payload.team_name, prompt_overrides={})
     bundle = generate_export_bundle(
         project_name=session.project_name,
         summary=session.graph_state.get("summary", ""),

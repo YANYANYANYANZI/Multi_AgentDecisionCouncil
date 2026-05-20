@@ -26,8 +26,9 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 export const councilApi = {
-  bootstrap() {
-    return request<BootstrapPayload>('/api/bootstrap')
+  bootstrap(teamName?: string) {
+    const query = teamName ? `?team_name=${encodeURIComponent(teamName)}` : ''
+    return request<BootstrapPayload>('/api/bootstrap' + query)
   },
   createSession(projectName: string) {
     return request<{ session: SessionSnapshot }>('/api/sessions', {

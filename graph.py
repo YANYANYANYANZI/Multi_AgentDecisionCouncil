@@ -93,12 +93,14 @@ def _route_after(after: AgentId | None = None) -> Callable[[CouncilState], str]:
 def build_graph(
     settings: Settings,
     preset_prompt: str = "",
+    team_name: str = "",
     selected_skills: dict[AgentId, str] | None = None,
     prompt_overrides: dict[AgentId, str] | None = None,
 ):
     configure_agents(
         settings=settings,
         preset_prompt=preset_prompt,
+        team_name=team_name,
         selected_skills=selected_skills,
         prompt_overrides=prompt_overrides,
     )
